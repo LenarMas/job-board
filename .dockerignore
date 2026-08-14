@@ -1,0 +1,11 @@
+node_modules
+.next
+.git
+data
+uploads
+migration/raw
+migration/exports
+.env
+.env.*
+*.db
+*.sqlite*

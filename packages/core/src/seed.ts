@@ -3,7 +3,11 @@
  * All companies, jobs, and people here are invented.
  *
  * Usage: npm run seed   (from the repo root; wipes data/jobtrack.db first)
+ *
+ * Refuses to wipe a database containing imported (non-demo) data unless
+ * called with --force.
  */
+import Database from "better-sqlite3";
 import fs from "node:fs";
 import { createDb, defaultDbPath } from "./db";
 import { createServices } from "./services";
@@ -12,7 +16,31 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const daysAgo = (n: number) => new Date(Date.now() - n * DAY_MS);
 
 const dbPath = defaultDbPath();
-if (fs.existsSync(dbPath)) fs.rmSync(dbPath);
+if (fs.existsSync(dbPath)) {
+  let importedCount = 0;
+  const probe = new Database(dbPath, { readonly: true });
+  try {
+    const row = probe
+      .prepare("select count(*) as n from jobs where source_id is not null")
+      .get() as { n: number };
+    importedCount = row.n;
+  } catch {
+    // no jobs table — nothing to protect
+  } finally {
+    probe.close();
+  }
+  if (importedCount > 0 && !process.argv.includes("--force")) {
+    console.error(
+      `${dbPath} contains ${importedCount} imported jobs — refusing to wipe it.\n` +
+        "Re-run with --force to overwrite with demo data (a fresh import can restore it).",
+    );
+    process.exit(1);
+  }
+  fs.rmSync(dbPath);
+  for (const suffix of ["-wal", "-shm"]) {
+    if (fs.existsSync(dbPath + suffix)) fs.rmSync(dbPath + suffix);
+  }
+}
 const db = createDb(dbPath);
 const svc = createServices(db);
 svc.getOrCreateDefaultBoard();
