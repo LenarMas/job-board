@@ -1,0 +1,18 @@
+# deps / build
+node_modules/
+.next/
+dist/
+*.tsbuildinfo
+
+# private data — never commit
+.env
+.env.*
+data/
+*.db
+*.sqlite*
+migration/raw/
+migration/exports/
+uploads/
+
+# os / editor
+.DS_Store
