@@ -5,7 +5,7 @@ Self-hosted job search tracker. A kanban pipeline for your applications
 contacts and documents, a metrics page, and an MCP server so you can read and
 update your board straight from an AI chat.
 
-![Board screenshot placeholder](docs/screenshot-board.png)
+![Kanban board with demo data](docs/screenshot-board.png)
 
 ## Features
 
