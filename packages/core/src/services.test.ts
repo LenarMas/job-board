@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type Db } from "./db";
 import { createServices, type Services } from "./services";
@@ -110,9 +111,9 @@ describe("moveJob position handling", () => {
     svc.moveJob(job.id, { stageName: "applied" });
     svc.moveJob(job.id, { stageName: "applied", index: 0 }); // reorder only
     svc.moveJob(job.id, { stageName: "interview" });
-    const rows = db.$client
-      .prepare("select count(*) as n from stage_events where job_id = ?")
-      .get(job.id) as { n: number };
+    const rows = db.get<{ n: number }>(
+      sql`select count(*) as n from stage_events where job_id = ${job.id}`,
+    );
     expect(rows.n).toBe(3); // create + 2 real stage changes
   });
 });
@@ -152,9 +153,7 @@ describe("activities, notes, contacts, documents", () => {
     svc.createNote({ jobId: job.id, body: "hi" });
     svc.createActivity({ jobId: job.id, category: "other", title: "x" });
     svc.deleteJob(job.id);
-    const notesLeft = db.$client.prepare("select count(*) as n from notes").get() as {
-      n: number;
-    };
+    const notesLeft = db.get<{ n: number }>(sql`select count(*) as n from notes`);
     expect(notesLeft.n).toBe(0);
   });
 });

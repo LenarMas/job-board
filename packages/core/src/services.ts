@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, isNotNull, like, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, isNotNull, isNull, like, or, sql } from "drizzle-orm";
 import type { Db } from "./db";
 import {
   activities,
@@ -280,6 +280,29 @@ export function createServices(db: Db) {
       }
       return db.update(jobs).set(values).where(eq(jobs.id, id)).returning().get();
     });
+  }
+
+  /** Everything the board page needs in one call. */
+  function boardSnapshot() {
+    const board = getOrCreateDefaultBoard();
+    const stageList = listStages(board.id);
+    const jobList = listJobs();
+    const pending = db
+      .select({ jobId: activities.jobId, n: count() })
+      .from(activities)
+      .where(isNull(activities.completedAt))
+      .groupBy(activities.jobId)
+      .all();
+    const pendingByJob = new Map(pending.map((p) => [p.jobId, p.n]));
+    return {
+      board,
+      stages: stageList.map((stage) => ({
+        ...stage,
+        jobs: jobList
+          .filter((j) => j.stageId === stage.id)
+          .map((j) => ({ ...j, pendingActivities: pendingByJob.get(j.id) ?? 0 })),
+      })),
+    };
   }
 
   // ---- activities ----
@@ -617,6 +640,7 @@ export function createServices(db: Db) {
     deleteJob,
     listJobs,
     moveJob,
+    boardSnapshot,
     listActivities,
     createActivity,
     updateActivity,
