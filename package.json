@@ -12,9 +12,14 @@
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "seed": "npm run seed -w @jobtrack/core"
+    "seed": "npm run seed -w @jobtrack/core",
+    "import": "tsx migration/import.ts"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "csv-parse": "^7.0.2",
+    "tsx": "^4.23.12"
   }
 }
