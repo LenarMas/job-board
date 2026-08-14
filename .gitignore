@@ -14,5 +14,10 @@ migration/raw/
 migration/exports/
 uploads/
 
+# local planning docs (not part of the public project)
+CLAUDE.md
+PLAN.md
+MIGRATION.md
+
 # os / editor
 .DS_Store
