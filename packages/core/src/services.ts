@@ -450,6 +450,10 @@ export function createServices(db: Db) {
     return db.insert(documents).values(input).returning().get();
   }
 
+  function getDocument(id: number) {
+    return db.select().from(documents).where(eq(documents.id, id)).get();
+  }
+
   function deleteDocument(id: number) {
     const doc = db.select().from(documents).where(eq(documents.id, id)).get();
     db.delete(documents).where(eq(documents.id, id)).run();
@@ -658,6 +662,7 @@ export function createServices(db: Db) {
     unlinkContact,
     listDocuments,
     createDocument,
+    getDocument,
     deleteDocument,
     search,
     getMetrics,
