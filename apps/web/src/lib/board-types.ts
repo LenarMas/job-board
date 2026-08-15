@@ -4,6 +4,7 @@ export type BoardJob = {
   stageId: number;
   companyId: number | null;
   companyName: string | null;
+  companyWebsite: string | null;
   location: string | null;
   url: string | null;
   salary: string | null;

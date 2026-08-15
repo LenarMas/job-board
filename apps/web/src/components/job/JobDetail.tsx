@@ -11,6 +11,7 @@ import type {
   NoteData,
   StageData,
 } from "@/lib/detail-types";
+import { CompanyLogo } from "../CompanyLogo";
 import { ActivitiesTab } from "./ActivitiesTab";
 import { CompanyTab } from "./CompanyTab";
 import { ContactsTab } from "./ContactsTab";
@@ -101,7 +102,16 @@ export function JobDetail({
       >
         <div className="border-b border-slate-200 px-6 pt-5 pb-0">
           <h1 className="text-2xl font-bold">{job.title}</h1>
-          {job.company && <p className="mt-1 text-slate-500">{job.company.name}</p>}
+          {job.company && (
+            <p className="mt-1 flex items-center gap-2 text-slate-500">
+              <CompanyLogo
+                name={job.company.name}
+                website={job.company.website}
+                size={20}
+              />
+              {job.company.name}
+            </p>
+          )}
           <nav className="mt-4 flex gap-1 overflow-x-auto">
             {TABS.map((t) => (
               <button

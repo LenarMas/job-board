@@ -208,6 +208,7 @@ export function createServices(db: Db) {
         stageId: jobs.stageId,
         companyId: jobs.companyId,
         companyName: companies.name,
+        companyWebsite: companies.website,
         location: jobs.location,
         url: jobs.url,
         salary: jobs.salary,

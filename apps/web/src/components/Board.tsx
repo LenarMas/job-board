@@ -128,6 +128,15 @@ export function Board({ initial }: { initial: BoardSnapshot }) {
     if (!res.ok) await refresh();
   }
 
+  async function handleDelete(id: number) {
+    // Optimistic removal; refresh reconciles.
+    setStages((prev) =>
+      prev.map((s) => ({ ...s, jobs: s.jobs.filter((j) => j.id !== id) })),
+    );
+    await fetch(`/api/jobs/${id}`, { method: "DELETE" });
+    await refresh();
+  }
+
   async function handleQuickAdd(stageId: number, title: string, company: string) {
     const res = await fetch("/api/jobs", {
       method: "POST",
@@ -182,6 +191,7 @@ export function Board({ initial }: { initial: BoardSnapshot }) {
               stage={stage}
               jobs={stage.jobs}
               onQuickAdd={handleQuickAdd}
+              onDelete={handleDelete}
             />
           ))}
         </div>
