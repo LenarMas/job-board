@@ -17,6 +17,12 @@ re-litigated later.
 - **2026-08-14** Job `position` is a REAL with gap-based ordering (insert
   bisects neighbours, renumbers the column when the gap is exhausted) so drag
   and drop is one row update instead of renumbering 400 cards per move.
+- **2026-08-15** Added `jobs.source` (applied / reachout / referral / other,
+  nullable) and granular interview activity categories (screen, hm, technical,
+  final) to power source and interview-round metrics. Imported data can't be
+  classified retroactively beyond title keywords, so untagged jobs with an
+  applied date count as applications and generic interviews are reported as
+  unclassified rather than guessed.
 - **2026-08-14** Source data arrived as the tracker's built-in full CSV export
   (migration option A) and is complete (per-stage job counts match the UI), so
   the importer reads CSVs from `migration/raw/` and no network capture is

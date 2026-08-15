@@ -14,6 +14,7 @@ import {
   createDb,
   createServices,
   DEFAULT_STAGES,
+  jobSources,
 } from "@jobtrack/core";
 
 // MCP hosts launch the server from an arbitrary working directory, but the
@@ -123,8 +124,12 @@ server.tool(
     location: z.string().optional(),
     salary: z.string().optional(),
     description: z.string().optional(),
+    source: z
+      .enum(jobSources)
+      .optional()
+      .describe("How the opportunity originated: applied, reachout (recruiter contacted you), referral, other"),
   },
-  async ({ title, company, stage, url, location, salary, description }) => {
+  async ({ title, company, stage, url, location, salary, description, source }) => {
     const job = svc.createJob({
       title,
       company,
@@ -134,7 +139,19 @@ server.tool(
       salary,
       description,
     });
+    if (source) svc.updateJob(job.id, { source });
     return text(`Created job #${job.id}: ${title} in ${stage}.`);
+  },
+);
+
+server.tool(
+  "set_source",
+  "Record how a job originated: applied (cold application), reachout (a recruiter contacted you, e.g. on LinkedIn), referral, or other. Drives the source breakdown in metrics.",
+  { job_id: z.number().int(), source: z.enum(jobSources) },
+  async ({ job_id, source }) => {
+    if (!svc.getJob(job_id)) return text(`No job with id ${job_id}.`);
+    svc.updateJob(job_id, { source });
+    return text(`Job #${job_id} source set to ${source}.`);
   },
 );
 
@@ -154,7 +171,7 @@ server.tool(
 
 server.tool(
   "log_activity",
-  "Log an activity on a job (apply, interview, follow_up, offer, other).",
+  "Log an activity on a job. Categories: apply, screen (recruiter/screening call), interview (generic), hm (hiring manager round), technical (coding/system design), final (final/onsite round), follow_up, offer, other. Prefer the specific round categories — they feed the interview-rounds metrics.",
   {
     job_id: z.number().int(),
     category: z.enum(activityCategories),
@@ -210,9 +227,19 @@ server.tool(
   async () => {
     const m = svc.getMetrics();
     const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+    const f = m.interviewFunnel;
     const lines = [
       "totals per stage:",
       ...m.totalsPerStage.map((t) => `  ${t.stage}: ${t.total}`),
+      "source breakdown (companies / jobs):",
+      ...m.sourceBreakdown.map((s) => `  ${s.source}: ${s.companies} / ${s.jobs}`),
+      "interview rounds:",
+      `  screening calls: ${f.screens}`,
+      `  hiring manager rounds: ${f.hmRounds}`,
+      `  technical rounds: ${f.technicalRounds}`,
+      `  final rounds: ${f.finalRounds}`,
+      `  offers: ${f.offers}`,
+      `  unclassified interviews: ${f.unclassifiedInterviews}`,
       "conversion:",
       `  applied → interview: ${pct(m.conversionRates.appliedToInterview)}`,
       `  interview → offer: ${pct(m.conversionRates.interviewToOffer)}`,

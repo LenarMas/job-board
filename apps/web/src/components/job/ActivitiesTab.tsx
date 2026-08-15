@@ -2,11 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { ActivityData } from "@/lib/detail-types";
+import type { ActivityData, StageEventData } from "@/lib/detail-types";
 
 const CATEGORIES = [
   { value: "apply", label: "Apply" },
+  { value: "screen", label: "Screening call" },
   { value: "interview", label: "Interview" },
+  { value: "hm", label: "Hiring manager" },
+  { value: "technical", label: "Technical" },
+  { value: "final", label: "Final round" },
   { value: "follow_up", label: "Follow up" },
   { value: "offer", label: "Offer" },
   { value: "other", label: "Other" },
@@ -15,9 +19,11 @@ const CATEGORIES = [
 export function ActivitiesTab({
   jobId,
   activities,
+  stageEvents = [],
 }: {
   jobId: number;
   activities: ActivityData[];
+  stageEvents?: StageEventData[];
 }) {
   const router = useRouter();
   const [title, setTitle] = useState("");
@@ -139,6 +145,37 @@ export function ActivitiesTab({
       )}
       {activities.length === 0 && (
         <p className="text-sm text-slate-400">No activities yet.</p>
+      )}
+
+      {stageEvents.length > 0 && (
+        <>
+          <h3 className="mt-5 mb-2 text-sm font-medium text-slate-500">
+            Stage history
+          </h3>
+          <ul className="space-y-1">
+            {stageEvents.map((e) => (
+              <li
+                key={e.id}
+                className="flex items-center gap-2 px-3 py-1 text-sm text-slate-500"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
+                {e.from ? (
+                  <span>
+                    Moved from <span className="font-medium capitalize">{e.from}</span> to{" "}
+                    <span className="font-medium capitalize">{e.to}</span>
+                  </span>
+                ) : (
+                  <span>
+                    Added to <span className="font-medium capitalize">{e.to}</span>
+                  </span>
+                )}
+                <span className="ml-auto text-xs text-slate-400">
+                  {e.movedAt.slice(0, 10)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );

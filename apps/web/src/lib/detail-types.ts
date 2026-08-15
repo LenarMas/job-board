@@ -11,8 +11,16 @@ export type JobDetailData = {
   createdAt: string;
   appliedAt: string | null;
   rejectedAt: string | null;
+  source: "applied" | "reachout" | "referral" | "other" | null;
   company: CompanyData | null;
   stage: { id: number; name: string } | null;
+};
+
+export type StageEventData = {
+  id: number;
+  from: string | null;
+  to: string;
+  movedAt: string;
 };
 
 export type CompanyData = {

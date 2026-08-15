@@ -222,6 +222,56 @@ describe("metrics", () => {
     expect(byStage.interview).toBeUndefined(); // still open
   });
 
+  it("classifies interview rounds by category first, then title keywords", () => {
+    const job = svc.createJob({ title: "A", stageName: "interview" });
+    // tagged categories
+    svc.createActivity({ jobId: job.id, category: "screen", title: "Recruiter chat" });
+    svc.createActivity({ jobId: job.id, category: "hm", title: "Manager conversation" });
+    svc.createActivity({ jobId: job.id, category: "technical", title: "Round 2" });
+    svc.createActivity({ jobId: job.id, category: "final", title: "Wrap-up" });
+    // imported-style: generic category, meaning lives in the title
+    svc.createActivity({ jobId: job.id, category: "interview", title: "Phone Screen" });
+    svc.createActivity({ jobId: job.id, category: "interview", title: "Hiring manager round" });
+    svc.createActivity({ jobId: job.id, category: "interview", title: "System design interview" });
+    svc.createActivity({ jobId: job.id, category: "interview", title: "Final onsite" });
+    svc.createActivity({ jobId: job.id, category: "interview", title: "interview" }); // unclassifiable
+    svc.createActivity({ jobId: job.id, category: "offer", title: "Offer Received" });
+    svc.createActivity({ jobId: job.id, category: "other", title: "Meeting" }); // not an interview
+    svc.createActivity({ jobId: job.id, category: "apply", title: "Applied" });
+    const funnel = svc.interviewFunnel();
+    expect(funnel).toEqual({
+      screens: 2,
+      hmRounds: 2,
+      technicalRounds: 2,
+      finalRounds: 2,
+      unclassifiedInterviews: 1,
+      offers: 1,
+    });
+  });
+
+  it("breaks down sources, assuming applied for untagged jobs with an applied date", () => {
+    const a = svc.createJob({ title: "A", company: "Acme", stageName: "applied", appliedAt: new Date() });
+    void a;
+    svc.createJob({ title: "B", company: "Acme", stageName: "applied", appliedAt: new Date() });
+    const c = svc.createJob({ title: "C", company: "Beta", stageName: "interview" });
+    svc.updateJob(c.id, { source: "reachout" });
+    svc.createJob({ title: "D", company: "Gamma", stageName: "wishlist" }); // untagged, never applied
+    const rows = Object.fromEntries(svc.sourceBreakdown().map((r) => [r.source, r]));
+    expect(rows.applied).toMatchObject({ jobs: 2, companies: 1 });
+    expect(rows.reachout).toMatchObject({ jobs: 1, companies: 1 });
+    expect(rows.untagged).toMatchObject({ jobs: 1, companies: 1 });
+  });
+
+  it("lists stage events with names, newest first", () => {
+    const job = svc.createJob({ title: "A", stageName: "wishlist", createdAt: daysAgo(5) });
+    svc.moveJob(job.id, { stageName: "applied" }, daysAgo(3));
+    svc.moveJob(job.id, { stageName: "interview" }, daysAgo(1));
+    const events = svc.listStageEvents(job.id);
+    expect(events.map((e) => e.to)).toEqual(["interview", "applied", "wishlist"]);
+    expect(events[0]!.from).toBe("applied");
+    expect(events[2]!.from).toBeNull();
+  });
+
   it("applications per week buckets by Monday-based week", () => {
     const job = svc.createJob({ title: "A", stageName: "wishlist" });
     svc.moveJob(job.id, { stageName: "applied" }, daysAgo(1));

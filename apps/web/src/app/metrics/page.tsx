@@ -5,6 +5,14 @@ export const dynamic = "force-dynamic";
 
 const ACCENT = "#4f46e5";
 
+const SOURCE_LABELS: Record<string, string> = {
+  applied: "Applied",
+  reachout: "Reachouts",
+  referral: "Referrals",
+  other: "Other",
+  untagged: "Untagged",
+};
+
 function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -196,6 +204,50 @@ export default function MetricsPage() {
               hint={`${m.responseRate.responded} of ${m.responseRate.applied} applications`}
             />
           </div>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">
+            Where jobs came from
+          </h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+            {m.sourceBreakdown.map((row) => (
+              <StatTile
+                key={row.source}
+                label={SOURCE_LABELS[row.source] ?? row.source}
+                value={String(row.companies)}
+                hint={`${row.jobs} job${row.jobs === 1 ? "" : "s"}`}
+              />
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-slate-400">
+            Counted in companies (tiles) and jobs (subtitles). Untagged jobs
+            with an applied date count as applications; set a job&apos;s Source
+            on its Info tab to reclassify.
+          </p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">
+            Interview rounds
+          </h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <StatTile label="Screening calls" value={String(m.interviewFunnel.screens)} />
+            <StatTile label="Hiring manager" value={String(m.interviewFunnel.hmRounds)} />
+            <StatTile label="Technical" value={String(m.interviewFunnel.technicalRounds)} />
+            <StatTile label="Final rounds" value={String(m.interviewFunnel.finalRounds)} />
+            <StatTile label="Offers" value={String(m.interviewFunnel.offers)} />
+            <StatTile
+              label="Unclassified"
+              value={String(m.interviewFunnel.unclassifiedInterviews)}
+              hint="interviews without a round type"
+            />
+          </div>
+          <p className="mt-2 text-xs text-slate-400">
+            Rounds are read from each activity&apos;s category, falling back to
+            keywords in its title. Retag unclassified interviews on the job&apos;s
+            Activities tab (or ask Claude to, via the MCP server).
+          </p>
         </section>
 
         <section>

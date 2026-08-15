@@ -10,6 +10,7 @@ import type {
   JobDetailData,
   NoteData,
   StageData,
+  StageEventData,
 } from "@/lib/detail-types";
 import { CompanyLogo } from "../CompanyLogo";
 import { ActivitiesTab } from "./ActivitiesTab";
@@ -25,6 +26,7 @@ type Tab = (typeof TABS)[number];
 export function JobDetail({
   job,
   activities,
+  stageEvents,
   notes,
   contacts,
   allContacts,
@@ -33,6 +35,7 @@ export function JobDetail({
 }: {
   job: JobDetailData;
   activities: ActivityData[];
+  stageEvents: StageEventData[];
   notes: NoteData[];
   contacts: ContactData[];
   allContacts: ContactData[];
@@ -133,7 +136,9 @@ export function JobDetail({
         </div>
         <div className="p-6">
           {tab === "Info" && <InfoTab job={job} />}
-          {tab === "Activities" && <ActivitiesTab jobId={job.id} activities={activities} />}
+          {tab === "Activities" && (
+            <ActivitiesTab jobId={job.id} activities={activities} stageEvents={stageEvents} />
+          )}
           {tab === "Notes" && <NotesTab jobId={job.id} notes={notes} />}
           {tab === "Contacts" && (
             <ContactsTab jobId={job.id} contacts={contacts} allContacts={allContacts} />

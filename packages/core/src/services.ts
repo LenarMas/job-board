@@ -625,6 +625,89 @@ export function createServices(db: Db) {
     return { applied, responded: respondedRows, rate: respondedRows / applied };
   }
 
+  /**
+   * Classify interview activities into rounds. Tagged categories win; for
+   * data imported with a bare "interview" category, fall back to keywords in
+   * the title. Whatever can't be classified is reported as such rather than
+   * guessed.
+   */
+  const ROUND_PATTERNS: Record<string, RegExp> = {
+    screen: /phone screen|phone interview|screening|recruiter (call|screen|chat)|intro call/i,
+    hm: /hiring manager|\bhm\b/i,
+    technical: /technical|coding|system design|pair programming|take[- ]home|architecture/i,
+    final: /final|onsite|on-site|panel/i,
+  };
+
+  function interviewFunnel() {
+    const rows = db
+      .select({ category: activities.category, title: activities.title })
+      .from(activities)
+      .all();
+    const funnel = { screens: 0, hmRounds: 0, technicalRounds: 0, finalRounds: 0, unclassifiedInterviews: 0, offers: 0 };
+    for (const row of rows) {
+      if (row.category === "apply" || row.category === "follow_up") continue;
+      if (row.category === "offer") { funnel.offers++; continue; }
+      if (row.category === "screen") { funnel.screens++; continue; }
+      if (row.category === "hm") { funnel.hmRounds++; continue; }
+      if (row.category === "technical") { funnel.technicalRounds++; continue; }
+      if (row.category === "final") { funnel.finalRounds++; continue; }
+      // Generic "interview" (or interview-looking "other"): classify by title.
+      if (ROUND_PATTERNS.screen!.test(row.title)) funnel.screens++;
+      else if (ROUND_PATTERNS.hm!.test(row.title)) funnel.hmRounds++;
+      else if (ROUND_PATTERNS.technical!.test(row.title)) funnel.technicalRounds++;
+      else if (ROUND_PATTERNS.final!.test(row.title)) funnel.finalRounds++;
+      else if (row.category === "interview") funnel.unclassifiedInterviews++;
+      // an unmatched "other" is not an interview — skip it
+    }
+    return funnel;
+  }
+
+  /**
+   * Where opportunities came from, counted in jobs and distinct companies.
+   * An untagged job that has an applied date is assumed to be a cold
+   * application (that's what creates an applied date); untagged jobs without
+   * one are reported as untagged, never guessed.
+   */
+  function sourceBreakdown() {
+    const rows = db
+      .select({ source: jobs.source, appliedAt: jobs.appliedAt, companyId: jobs.companyId })
+      .from(jobs)
+      .all();
+    const buckets = new Map<string, { jobs: number; companies: Set<number | null> }>();
+    for (const row of rows) {
+      const key = row.source ?? (row.appliedAt ? "applied" : "untagged");
+      const bucket = buckets.get(key) ?? { jobs: 0, companies: new Set() };
+      bucket.jobs++;
+      bucket.companies.add(row.companyId);
+      buckets.set(key, bucket);
+    }
+    const order = ["applied", "reachout", "referral", "other", "untagged"];
+    return order
+      .filter((key) => buckets.has(key))
+      .map((key) => ({
+        source: key,
+        jobs: buckets.get(key)!.jobs,
+        companies: buckets.get(key)!.companies.size,
+      }));
+  }
+
+  /** Stage-change history for one job, with stage names, newest first. */
+  function listStageEvents(jobId: number) {
+    const stageById = new Map(db.select().from(stages).all().map((s) => [s.id, s.name]));
+    return db
+      .select()
+      .from(stageEvents)
+      .where(eq(stageEvents.jobId, jobId))
+      .orderBy(desc(stageEvents.movedAt))
+      .all()
+      .map((e) => ({
+        id: e.id,
+        from: e.fromStageId ? (stageById.get(e.fromStageId) ?? null) : null,
+        to: stageById.get(e.toStageId) ?? "?",
+        movedAt: e.movedAt,
+      }));
+  }
+
   function getMetrics() {
     return {
       totalsPerStage: totalsPerStage(),
@@ -632,6 +715,8 @@ export function createServices(db: Db) {
       conversionRates: conversionRates(),
       averageDaysInStage: averageDaysInStage(),
       responseRate: responseRate(),
+      interviewFunnel: interviewFunnel(),
+      sourceBreakdown: sourceBreakdown(),
     };
   }
 
@@ -672,6 +757,9 @@ export function createServices(db: Db) {
     deleteDocument,
     search,
     getMetrics,
+    interviewFunnel,
+    sourceBreakdown,
+    listStageEvents,
     totalsPerStage,
     applicationsPerWeek,
     conversionRates,

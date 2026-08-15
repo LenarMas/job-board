@@ -46,6 +46,9 @@ export const companies = sqliteTable("companies", {
   extras: text("extras", { mode: "json" }),
 });
 
+export const jobSources = ["applied", "reachout", "referral", "other"] as const;
+export type JobSource = (typeof jobSources)[number];
+
 export const jobs = sqliteTable(
   "jobs",
   {
@@ -68,6 +71,9 @@ export const jobs = sqliteTable(
     createdAt: createdAt(),
     appliedAt: integer("applied_at", { mode: "timestamp_ms" }),
     rejectedAt: integer("rejected_at", { mode: "timestamp_ms" }),
+    // How the opportunity originated (cold application vs recruiter reachout
+    // vs referral); null means untagged.
+    source: text("source", { enum: jobSources }),
     sourceId: text("source_id").unique(),
     extras: text("extras", { mode: "json" }),
   },
@@ -79,7 +85,11 @@ export const jobs = sqliteTable(
 
 export const activityCategories = [
   "apply",
+  "screen",
   "interview",
+  "hm",
+  "technical",
+  "final",
   "follow_up",
   "offer",
   "other",

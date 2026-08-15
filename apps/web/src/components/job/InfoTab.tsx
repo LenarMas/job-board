@@ -14,6 +14,7 @@ export function InfoTab({ job }: { job: JobDetailData }) {
     salary: job.salary ?? "",
     color: job.color ?? "#94a3b8",
     deadline: job.deadline ? job.deadline.slice(0, 10) : "",
+    source: job.source ?? "",
     description: job.description ?? "",
   });
   const [saving, setSaving] = useState(false);
@@ -69,6 +70,20 @@ export function InfoTab({ job }: { job: JobDetailData }) {
           value={form.deadline}
           onChange={(e) => set("deadline", e.target.value)}
         />
+      </label>
+      <label className="block text-sm">
+        <span className="text-slate-600">Source</span>
+        <select
+          className={field}
+          value={form.source}
+          onChange={(e) => set("source", e.target.value)}
+        >
+          <option value="">—</option>
+          <option value="applied">Applied myself</option>
+          <option value="reachout">LinkedIn reachout</option>
+          <option value="referral">Referral</option>
+          <option value="other">Other</option>
+        </select>
       </label>
       <label className="block text-sm">
         <span className="text-slate-600">Color</span>

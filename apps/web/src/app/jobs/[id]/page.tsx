@@ -18,6 +18,7 @@ export default async function JobPage({
     JSON.stringify({
       job,
       activities: svc.listActivities(job.id),
+      stageEvents: svc.listStageEvents(job.id),
       notes: svc.listNotes(job.id),
       contacts: svc.listContactsForJob(job.id),
       allContacts: svc.listContacts(),

@@ -14,8 +14,11 @@ export async function PATCH(request: Request, { params }: Params) {
   const { id } = await params;
   const body = await request.json();
   const patch: Record<string, unknown> = {};
-  for (const key of ["title", "location", "url", "salary", "color", "description", "company"]) {
+  for (const key of ["title", "location", "url", "salary", "color", "description", "company", "source"]) {
     if (key in body) patch[key] = body[key] || null;
+  }
+  if (patch.source && !["applied", "reachout", "referral", "other"].includes(patch.source as string)) {
+    return NextResponse.json({ error: "invalid source" }, { status: 400 });
   }
   if ("deadline" in body) {
     patch.deadline = body.deadline ? new Date(body.deadline) : null;
