@@ -168,6 +168,7 @@ export function Board({ initial }: { initial: BoardSnapshot }) {
         )}
       </div>
       <DndContext
+        id="board-dnd"
         sensors={sensors}
         collisionDetection={closestCorners}
         onDragStart={handleDragStart}

@@ -25,3 +25,6 @@ MIGRATION.md
 
 # os / editor
 .DS_Store
+
+# playwright mcp artifacts
+.playwright-mcp/
