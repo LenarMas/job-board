@@ -1,0 +1,18 @@
+{
+  "name": "@jobtrack/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/background.ts src/content.ts src/popup.ts --bundle --format=iife --target=chrome120 --outdir=dist && cp manifest.json popup.html dist/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.280",
+    "esbuild": "^0.25.0",
+    "jsdom": "^26.0.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  }
+}

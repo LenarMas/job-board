@@ -180,6 +180,10 @@ export function createServices(db: Db) {
     db.delete(jobs).where(eq(jobs.id, id)).run();
   }
 
+  function findJobByUrl(url: string) {
+    return db.select().from(jobs).where(eq(jobs.url, url)).get();
+  }
+
   type ListJobsFilter = { stageId?: number; stageName?: string; query?: string };
 
   function listJobs(filter: ListJobsFilter = {}) {
@@ -642,6 +646,7 @@ export function createServices(db: Db) {
     getJob,
     updateJob,
     deleteJob,
+    findJobByUrl,
     listJobs,
     moveJob,
     boardSnapshot,
