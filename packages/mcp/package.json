@@ -5,6 +5,8 @@
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js --external:better-sqlite3",
+    "start": "node dist/index.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -13,6 +15,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
     "typescript": "^5.8.0"
   }
 }

@@ -16,11 +16,14 @@ import {
   DEFAULT_STAGES,
 } from "@jobtrack/core";
 
-// Resolve the DB relative to this file, not cwd — MCP hosts launch the server
-// from an arbitrary working directory.
+// MCP hosts launch the server from an arbitrary working directory, but the
+// core package resolves the migrations folder (and the default DB path) by
+// walking up from cwd. This file lives at packages/mcp/{src,dist}/index.*, so
+// three levels up is the repo root — anchor the process there.
+process.chdir(path.join(import.meta.dirname, "..", "..", ".."));
+
 const dbPath =
-  process.env.JOBTRACK_DB ??
-  path.join(import.meta.dirname, "..", "..", "..", "data", "jobtrack.db");
+  process.env.JOBTRACK_DB ?? path.join(process.cwd(), "data", "jobtrack.db");
 const svc = createServices(createDb(dbPath));
 svc.getOrCreateDefaultBoard();
 

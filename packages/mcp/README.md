@@ -19,32 +19,53 @@ layer.
 
 ## Setup
 
-Requires `npm install` at the repo root first. The server reads
-`data/jobtrack.db` relative to the repo (override with the `JOBTRACK_DB`
-environment variable).
+From the repo root:
+
+```sh
+npm install
+npm run build -w @jobtrack/mcp   # emits packages/mcp/dist/index.js
+```
+
+The server needs only Node 20+ to run — no build tools at launch time:
+
+```sh
+node packages/mcp/dist/index.js
+```
+
+It works from any working directory. The database defaults to
+`data/jobtrack.db` inside the repo; set `JOBTRACK_DB` to an absolute path to
+override.
 
 ### Claude Desktop
 
-Add to `claude_desktop_config.json` (Settings → Developer → Edit Config):
+Add to `claude_desktop_config.json` (Settings → Developer → Edit Config),
+replacing `/absolute/path/to/jobtrack` with where you cloned the repo:
 
 ```json
 {
   "mcpServers": {
     "jobtrack": {
-      "command": "npx",
-      "args": ["-y", "tsx", "/absolute/path/to/jobtrack/packages/mcp/src/index.ts"]
+      "command": "node",
+      "args": ["/absolute/path/to/jobtrack/packages/mcp/dist/index.js"],
+      "env": {
+        "JOBTRACK_DB": "/absolute/path/to/jobtrack/data/jobtrack.db"
+      }
     }
   }
 }
 ```
 
+`JOBTRACK_DB` is optional (the server finds the repo's `data/` on its own) but
+spelling it out makes the config self-documenting.
+
 ### Claude Code
 
 ```sh
-claude mcp add jobtrack -- npx -y tsx /absolute/path/to/jobtrack/packages/mcp/src/index.ts
+claude mcp add jobtrack -- node /absolute/path/to/jobtrack/packages/mcp/dist/index.js
 ```
 
 Restart the client and ask it something like "what's on my job board?".
+Re-run the build after pulling changes to this package.
 
 ## Smoke test checklist
 
