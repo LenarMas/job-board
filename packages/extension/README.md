@@ -10,13 +10,20 @@ page-title fallback) before you hit Save.
 
 ## How parsing works
 
-1. **JSON-LD `JobPosting`** — LinkedIn, Greenhouse, Lever, and Ashby all embed
-   schema.org metadata; this is the most reliable source.
-2. **Per-site selectors** — Workday and Indeed (plus fallbacks for the four
-   above) are scraped with DOM selectors kept in one place,
+1. **JSON-LD `JobPosting`** — public/guest views of Greenhouse, Lever, Ashby,
+   and LinkedIn embed schema.org metadata; this is the most reliable source.
+2. **Logged-in LinkedIn** — the authenticated app strips all metadata and
+   hashes its class names, so it gets a dedicated structural parser
+   (`parseLinkedInApp` in [`src/parse.ts`](src/parse.ts)) anchored on the page
+   title, company links, and the "About the job" section. Captured URLs are
+   normalized to `linkedin.com/jobs/view/<id>/` with tracking params removed,
+   so recapturing the same posting dedupes correctly. The content script
+   retries for a few seconds while LinkedIn's SPA finishes rendering.
+3. **Per-site selectors** — Workday and Indeed (plus guest-page fallbacks for
+   the boards above) are scraped with DOM selectors kept in one place,
    [`src/sites.ts`](src/sites.ts), so a site redesign is a one-line fix.
-3. **Page fallback** — anywhere else you get the page title and site name
-   pre-filled and type the rest.
+4. **Page fallback** — anywhere else you get the page title and the page's
+   best company hint pre-filled and type the rest.
 
 Saving posts to `POST /api/jobs/capture` on your local JobTrack
 (`http://localhost:3000`). The endpoint dedupes on the post URL — capturing

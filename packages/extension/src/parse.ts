@@ -3,27 +3,36 @@ import type { CapturedJob } from "./types";
 
 /**
  * Pure parsing logic, testable against fixture HTML. Order of preference:
- *  1. JSON-LD JobPosting (LinkedIn, Greenhouse, Lever, Ashby all emit it)
- *  2. Per-site DOM selectors from sites.ts
- *  3. Page title + og:site_name
+ *  1. JSON-LD JobPosting (public/guest views of the big boards emit it)
+ *  2. Site-specific structural parsers (authenticated LinkedIn strips all
+ *     metadata and hashes its class names, so it needs its own logic)
+ *  3. Per-site DOM selectors from sites.ts
+ *  4. Page title + whatever company hints the page still carries
  * The popup always shows the result for review before saving, so a partial
  * parse is acceptable — silently wrong data is not, which is why the source
  * is reported alongside the fields.
  */
 export function parseJobPosting(doc: Document, pageUrl: string): CapturedJob {
+  const url = canonicalUrl(doc, pageUrl);
+
   const fromJsonLd = parseJsonLd(doc);
-  if (fromJsonLd) return { ...fromJsonLd, url: canonicalUrl(doc, pageUrl) };
+  if (fromJsonLd) return { ...fromJsonLd, url };
+
+  if (isLinkedInHost(pageUrl)) {
+    const fromLinkedIn = parseLinkedInApp(doc);
+    if (fromLinkedIn) return { ...fromLinkedIn, url };
+  }
 
   const fromSite = parseSiteSelectors(doc, pageUrl);
-  if (fromSite) return { ...fromSite, url: canonicalUrl(doc, pageUrl) };
+  if (fromSite) return { ...fromSite, url };
 
   return {
-    title: doc.title.trim(),
-    company: metaContent(doc, "og:site_name") ?? "",
+    title: cleanDocumentTitle(doc.title),
+    company: fallbackCompany(doc),
     location: "",
     salary: "",
     description: "",
-    url: canonicalUrl(doc, pageUrl),
+    url,
     source: "page-fallback",
   };
 }
@@ -133,6 +142,103 @@ function num(v: unknown): string | null {
   return str(v);
 }
 
+// ---------- authenticated LinkedIn ----------
+//
+// The logged-in app renders no JSON-LD, no <h1>, no og: metas, and hashes its
+// CSS class names per build, so neither schema parsing nor class selectors
+// can work. The anchors below are the only stable ones:
+//   - document.title is "Job Title | Company | LinkedIn" on /jobs/view/ pages
+//   - the top card links the company via a[href*="/company/"]
+//   - a <p> holds "Location · N weeks ago · N people clicked apply"
+//   - the description section is headed by the literal text "About the job"
+
+function isLinkedInHost(pageUrl: string): boolean {
+  try {
+    const host = new URL(pageUrl).hostname;
+    return host === "linkedin.com" || host.endsWith(".linkedin.com");
+  } catch {
+    return false;
+  }
+}
+
+export function parseLinkedInApp(doc: Document): Omit<CapturedJob, "url"> | null {
+  const titleParts = cleanDocumentTitle(doc.title).split(" | ");
+  const scope = doc.querySelector("main") ?? doc.body;
+
+  let title = "";
+  let company = "";
+  if (titleParts.length >= 3 && titleParts[titleParts.length - 1] === "LinkedIn") {
+    title = titleParts.slice(0, -2).join(" | ").trim();
+    company = titleParts[titleParts.length - 2]!.trim();
+  }
+  if (!company) company = linkedInCompanyAnchor(scope);
+  if (!title) return null;
+
+  // "United States · 2 weeks ago · Over 100 people clicked apply" — require
+  // the activity words so "Promoted by hirer · …" style lines never match.
+  let location = "";
+  const metaLines = [...scope.querySelectorAll("p, div, span")].filter(
+    (el) =>
+      el.childElementCount <= 8 &&
+      el.textContent !== null &&
+      el.textContent.length < 250 &&
+      el.textContent.includes("·") &&
+      /\bago\b|applicant|people clicked|viewed/i.test(el.textContent),
+  );
+  for (const line of metaLines) {
+    const first = line.textContent!.split("·")[0]!.replace(/\s+/g, " ").trim();
+    if (first && !/\bago\b|applicant|clicked|viewed|promoted/i.test(first)) {
+      location = first;
+      break;
+    }
+  }
+
+  // Salary chips look like "$120K/yr - $140K/yr".
+  let salary = "";
+  for (const el of scope.querySelectorAll("span, div, p")) {
+    const text = el.textContent?.replace(/\s+/g, " ").trim() ?? "";
+    if (
+      el.childElementCount === 0 &&
+      text.length < 60 &&
+      /[$€£]\s?\d[\d,.]*\s*[Kk]?/.test(text) &&
+      /\/\s*(yr|hr|year|hour|mo)|[Kk]\b|,\d{3}/.test(text)
+    ) {
+      salary = text;
+      break;
+    }
+  }
+
+  // Description: the section headed by the literal "About the job".
+  let description = "";
+  const aboutHeading = [...scope.querySelectorAll("*")].find(
+    (el) =>
+      el.childElementCount === 0 &&
+      el.textContent?.replace(/\s+/g, " ").trim().toLowerCase() === "about the job",
+  );
+  if (aboutHeading) {
+    let container: Element = aboutHeading;
+    while (
+      container.parentElement &&
+      (container.textContent?.length ?? 0) < 500
+    ) {
+      container = container.parentElement;
+    }
+    description = elementToText(container)
+      .replace(/^about the job\s*/i, "")
+      .trim();
+  }
+
+  return { title, company, location, salary, description, source: "site-selectors" };
+}
+
+function linkedInCompanyAnchor(scope: Element | Document): string {
+  for (const a of scope.querySelectorAll('a[href*="/company/"]')) {
+    const text = a.textContent?.replace(/\s+/g, " ").trim() ?? "";
+    if (text && text.length < 80 && !/^follow\b|^view\b/i.test(text)) return text;
+  }
+  return "";
+}
+
 // ---------- site selectors ----------
 
 function parseSiteSelectors(
@@ -179,11 +285,53 @@ function metaContent(doc: Document, property: string): string | null {
   return el?.getAttribute("content")?.trim() || null;
 }
 
-function canonicalUrl(doc: Document, pageUrl: string): string {
+export function canonicalUrl(doc: Document, pageUrl: string): string {
   const canonical = doc
     .querySelector('link[rel="canonical"]')
     ?.getAttribute("href");
-  return canonical?.trim() || pageUrl;
+  const url = canonical?.trim() || pageUrl;
+  return normalizeLinkedInUrl(url);
+}
+
+/**
+ * LinkedIn buries the job id in tracking noise. Reduce every variant —
+ * /jobs/view/<id>/?trk=…&refId=…, /jobs/search/?currentJobId=<id>&… — to the
+ * canonical https://www.linkedin.com/jobs/view/<id>/ so URL dedupe works.
+ */
+export function normalizeLinkedInUrl(url: string): string {
+  if (!isLinkedInHost(url)) return url;
+  try {
+    const parsed = new URL(url);
+    const viewMatch = parsed.pathname.match(/\/jobs\/view\/(\d+)/);
+    const id = viewMatch?.[1] ?? parsed.searchParams.get("currentJobId");
+    if (id && /^\d+$/.test(id)) {
+      return `https://www.linkedin.com/jobs/view/${id}/`;
+    }
+    return url;
+  } catch {
+    return url;
+  }
+}
+
+/** Strip the "(3) " unread-count prefix LinkedIn puts on document.title. */
+function cleanDocumentTitle(title: string): string {
+  return title.replace(/^\(\d+\)\s*/, "").trim();
+}
+
+/**
+ * Last-resort company lookup for the page fallback: og: metas first, then a
+ * company profile link, then the middle segment of an "X | Company | Site"
+ * page title. The user reviews everything before saving, so a good guess
+ * beats an empty field.
+ */
+function fallbackCompany(doc: Document): string {
+  const fromMeta = metaContent(doc, "og:site_name");
+  if (fromMeta) return fromMeta;
+  const fromAnchor = linkedInCompanyAnchor(doc);
+  if (fromAnchor) return fromAnchor;
+  const parts = cleanDocumentTitle(doc.title).split(" | ");
+  if (parts.length >= 3) return parts[parts.length - 2]!.trim();
+  return "";
 }
 
 /** Render an HTML string (e.g. a JSON-LD description) as readable plain text. */

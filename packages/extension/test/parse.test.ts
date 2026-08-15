@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseJobPosting, parseJsonLd } from "../src/parse";
+import { normalizeLinkedInUrl, parseJobPosting, parseJsonLd } from "../src/parse";
 
 function loadFixture(name: string): Document {
   const html = fs.readFileSync(
@@ -93,6 +93,48 @@ describe("site-selector fallback", () => {
     const doc = loadFixture("indeed");
     const job = parseJobPosting(doc, "https://jobs.unknown-board.example/000006");
     expect(job.source).toBe("page-fallback");
+  });
+});
+
+describe("authenticated LinkedIn app", () => {
+  const TRACKING_URL =
+    "https://www.linkedin.com/jobs/view/4000000001/?alternateChannel=search&trk=d_flagship3_search_srp_jobs&refId=NotAvailable&trackingId=Uxxxx";
+
+  it("parses the logged-in view, which has no JSON-LD, no h1, and hashed classes", () => {
+    const doc = loadFixture("linkedin-auth");
+    const job = parseJobPosting(doc, TRACKING_URL);
+    expect(job.source).toBe("site-selectors");
+    expect(job.title).toBe("Platform Reliability Engineer"); // "(2) " prefix stripped
+    expect(job.company).toBe("Mistfall Systems");
+    expect(job.location).toBe("Remote, US");
+    expect(job.salary).toBe("$130K/yr - $155K/yr");
+    expect(job.description).toContain("routing software for regional freight carriers");
+    expect(job.description).toContain("Run and upgrade our GKE clusters");
+    expect(job.description).not.toMatch(/^About the job/i);
+  });
+
+  it("strips tracking params down to the canonical /jobs/view/<id> URL", () => {
+    const doc = loadFixture("linkedin-auth");
+    const job = parseJobPosting(doc, TRACKING_URL);
+    expect(job.url).toBe("https://www.linkedin.com/jobs/view/4000000001/");
+  });
+
+  it("canonicalizes search-pane URLs via currentJobId", () => {
+    expect(
+      normalizeLinkedInUrl(
+        "https://www.linkedin.com/jobs/search/?currentJobId=4000000001&keywords=platform&origin=SWITCH",
+      ),
+    ).toBe("https://www.linkedin.com/jobs/view/4000000001/");
+    // non-LinkedIn URLs pass through untouched
+    expect(normalizeLinkedInUrl("https://boards.example-ats.io/x/jobs/1?gh_src=abc")).toBe(
+      "https://boards.example-ats.io/x/jobs/1?gh_src=abc",
+    );
+  });
+
+  it("never picks the 'Promoted by hirer' line as the location", () => {
+    const doc = loadFixture("linkedin-auth");
+    const job = parseJobPosting(doc, TRACKING_URL);
+    expect(job.location).not.toMatch(/promoted/i);
   });
 });
 

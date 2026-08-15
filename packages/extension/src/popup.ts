@@ -17,18 +17,28 @@ function setStatus(kind: "ok" | "error" | "", text: string) {
   el.textContent = text;
 }
 
-async function targetTabId(): Promise<number> {
+async function targetTab(): Promise<chrome.tabs.Tab> {
   const fromQuery = new URLSearchParams(window.location.search).get("tabId");
-  if (fromQuery) return Number(fromQuery);
+  if (fromQuery) return chrome.tabs.get(Number(fromQuery));
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) throw new Error("No active tab.");
-  return tab.id;
+  return tab;
 }
 
 async function scrape(): Promise<void> {
   try {
-    const tabId = await targetTabId();
+    const tab = await targetTab();
+    // Content scripts can't run on chrome://, the Web Store, or file previews.
+    // Bail out cleanly instead of letting executeScript log an error. (An
+    // undefined url just means no permission to read it — still try.)
+    if (tab.url && !/^https?:/.test(tab.url)) {
+      $<HTMLDivElement>("source").textContent =
+        "This page can't be captured (only regular web pages work). Fill the form in manually.";
+      return;
+    }
+    const tabId = tab.id!;
     await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+    $<HTMLDivElement>("source").textContent = "Reading page…";
     const response: ScrapeResponse = await chrome.tabs.sendMessage(tabId, {
       type: "jobtrack-scrape",
     });

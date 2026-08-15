@@ -15,6 +15,8 @@ export type SiteSelectors = {
 
 export const SITES: SiteSelectors[] = [
   {
+    // Guest/logged-out pages only. The authenticated app has no usable
+    // classes at all and is handled by parseLinkedInApp in parse.ts.
     host: "linkedin.com",
     title: ["h1.top-card-layout__title", ".job-details-jobs-unified-top-card__job-title h1", "h1"],
     company: [
