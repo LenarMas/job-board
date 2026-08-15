@@ -136,6 +136,16 @@ describe("authenticated LinkedIn app", () => {
     const job = parseJobPosting(doc, TRACKING_URL);
     expect(job.location).not.toMatch(/promoted/i);
   });
+
+  it("never picks the merged top-card container text as the location", () => {
+    // Regression: the top card's wrapper div also contains "·" and the
+    // activity words; its first segment is "<company><title> <location>".
+    const doc = loadFixture("linkedin-auth");
+    const job = parseJobPosting(doc, TRACKING_URL);
+    expect(job.location).toBe("Remote, US");
+    expect(job.location).not.toContain("Mistfall");
+    expect(job.location).not.toContain("Platform Reliability Engineer");
+  });
 });
 
 describe("page fallback", () => {

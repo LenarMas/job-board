@@ -176,18 +176,28 @@ export function parseLinkedInApp(doc: Document): Omit<CapturedJob, "url"> | null
 
   // "United States · 2 weeks ago · Over 100 people clicked apply" — require
   // the activity words so "Promoted by hirer · …" style lines never match.
+  // The whole top card also matches these filters (its text merges company,
+  // title, and this line), so sort candidates by text length and take the
+  // shortest: that's the innermost element holding just the metadata line.
   let location = "";
-  const metaLines = [...scope.querySelectorAll("p, div, span")].filter(
-    (el) =>
-      el.childElementCount <= 8 &&
-      el.textContent !== null &&
-      el.textContent.length < 250 &&
-      el.textContent.includes("·") &&
-      /\bago\b|applicant|people clicked|viewed/i.test(el.textContent),
-  );
+  const metaLines = [...scope.querySelectorAll("p, div, span")]
+    .filter(
+      (el) =>
+        el.childElementCount <= 8 &&
+        el.textContent !== null &&
+        el.textContent.length < 250 &&
+        el.textContent.includes("·") &&
+        /\bago\b|applicant|people clicked|viewed/i.test(el.textContent),
+    )
+    .sort((a, b) => a.textContent!.length - b.textContent!.length);
   for (const line of metaLines) {
     const first = line.textContent!.split("·")[0]!.replace(/\s+/g, " ").trim();
-    if (first && !/\bago\b|applicant|clicked|viewed|promoted/i.test(first)) {
+    if (
+      first &&
+      first.length < 80 &&
+      !/\bago\b|applicant|clicked|viewed|promoted/i.test(first) &&
+      !(title && first.includes(title))
+    ) {
       location = first;
       break;
     }

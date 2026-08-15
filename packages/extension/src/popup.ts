@@ -11,10 +11,19 @@ const SOURCE_LABELS: Record<CapturedJob["source"], string> = {
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const fields = ["title", "company", "location", "salary", "url", "description"] as const;
 
-function setStatus(kind: "ok" | "error" | "", text: string) {
+function setStatus(kind: "ok" | "error" | "", text: string, jobId?: number) {
   const el = $<HTMLDivElement>("status");
   el.className = kind;
   el.textContent = text;
+  if (jobId !== undefined) {
+    el.append(" ");
+    const link = document.createElement("a");
+    link.href = `${APP_URL}/jobs/${jobId}`;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    link.textContent = "Open in JobTrack ↗";
+    el.append(link);
+  }
 }
 
 async function targetTab(): Promise<chrome.tabs.Tab> {
@@ -75,12 +84,14 @@ async function save(event: Event): Promise<void> {
       throw new Error(body?.error ?? `JobTrack responded with ${res.status}`);
     }
     const { job, duplicate } = await res.json();
-    setStatus(
-      "ok",
-      duplicate
-        ? `Already on your board (#${job.id}) — nothing saved.`
-        : `Saved to ${stage} (#${job.id}).`,
-    );
+    if (duplicate) {
+      // Leave the popup open so the user can jump to the existing card.
+      setStatus("ok", `Already on your board (#${job.id}).`, job.id);
+    } else {
+      setStatus("ok", `Saved to ${stage} (#${job.id}).`, job.id);
+      // Job done — close the popup the way a save should feel.
+      setTimeout(() => window.close(), 1200);
+    }
   } catch (err) {
     // Keep the form contents — nothing the user captured is lost.
     const detail = err instanceof Error ? err.message : String(err);
