@@ -23,6 +23,9 @@ export default function Home() {
           <Link href="/metrics" className="text-slate-600 hover:text-slate-900">
             Metrics
           </Link>
+          <Link href="/profile" className="text-slate-600 hover:text-slate-900">
+            Profile
+          </Link>
         </nav>
       </header>
       <main className="min-h-0 flex-1">

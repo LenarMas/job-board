@@ -9,6 +9,7 @@ import {
   jobContacts,
   jobs,
   notes,
+  profile,
   stageEvents,
   stages,
   type ActivityCategory,
@@ -465,6 +466,23 @@ export function createServices(db: Db) {
     return doc;
   }
 
+  // ---- profile (single row, id = 1) ----
+
+  function getProfile() {
+    const row = db.select().from(profile).where(eq(profile.id, 1)).get();
+    return row ?? db.insert(profile).values({ id: 1 }).returning().get();
+  }
+
+  function saveProfile(patch: Partial<Omit<typeof profile.$inferInsert, "id">>) {
+    getProfile(); // ensure the row exists
+    return db
+      .update(profile)
+      .set(patch)
+      .where(eq(profile.id, 1))
+      .returning()
+      .get();
+  }
+
   // ---- search ----
 
   function search(query: string) {
@@ -755,6 +773,8 @@ export function createServices(db: Db) {
     createDocument,
     getDocument,
     deleteDocument,
+    getProfile,
+    saveProfile,
     search,
     getMetrics,
     interviewFunnel,

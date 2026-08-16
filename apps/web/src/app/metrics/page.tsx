@@ -152,6 +152,9 @@ export default function MetricsPage() {
           <Link href="/metrics" className="font-medium text-indigo-600">
             Metrics
           </Link>
+          <Link href="/profile" className="text-slate-600 hover:text-slate-900">
+            Profile
+          </Link>
         </nav>
       </header>
 

@@ -196,6 +196,25 @@ export const stageEvents = sqliteTable(
   (t) => [index("stage_events_job_idx").on(t.jobId, t.movedAt)],
 );
 
+// Single-row table (id = 1): the owner's applicant profile, used by the
+// browser extension to autofill application forms. The resume file itself
+// lives under uploads/.
+export const profile = sqliteTable("profile", {
+  id: integer("id").primaryKey(),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  email: text("email"),
+  phone: text("phone"),
+  location: text("location"),
+  linkedin: text("linkedin"),
+  github: text("github"),
+  website: text("website"),
+  resumeFilename: text("resume_filename"),
+  resumePath: text("resume_path"),
+});
+
+export type Profile = typeof profile.$inferSelect;
+
 export type Board = typeof boards.$inferSelect;
 export type Stage = typeof stages.$inferSelect;
 export type Company = typeof companies.$inferSelect;

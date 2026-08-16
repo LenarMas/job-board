@@ -1,53 +1,21 @@
 import { NextResponse } from "next/server";
 import { DEFAULT_STAGES } from "@jobtrack/core";
+import { extensionCorsHeaders, preflight, rejectDisallowed } from "@/lib/extension-cors";
 import { getServices } from "@/lib/services";
 
 /**
- * Capture endpoint for the browser extension. Localhost-only, no auth:
- * requests must arrive on a localhost host, and CORS is granted only to
- * chrome-extension origins.
+ * Capture endpoint for the browser extension. Localhost-only, no auth;
+ * origin rules live in lib/extension-cors.
  */
 
-const EXTENSION_ORIGIN = /^chrome-extension:\/\/[a-p]{32}$/;
-const LOCALHOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
-
-function corsHeaders(request: Request): Record<string, string> | null {
-  const origin = request.headers.get("origin");
-  if (!origin || !EXTENSION_ORIGIN.test(origin)) return null;
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    Vary: "Origin",
-  };
-}
-
-function isLocalhost(request: Request): boolean {
-  return LOCALHOST.test(request.headers.get("host") ?? "");
-}
-
 export async function OPTIONS(request: Request) {
-  if (!isLocalhost(request)) {
-    return NextResponse.json({ error: "localhost only" }, { status: 403 });
-  }
-  const headers = corsHeaders(request);
-  if (!headers) {
-    return NextResponse.json({ error: "origin not allowed" }, { status: 403 });
-  }
-  return new NextResponse(null, { status: 204, headers });
+  return preflight(request);
 }
 
 export async function POST(request: Request) {
-  if (!isLocalhost(request)) {
-    return NextResponse.json({ error: "localhost only" }, { status: 403 });
-  }
-  // A browser request carries an Origin header and must pass the CORS gate;
-  // same-machine tools (curl, scripts) send none and are allowed through.
-  const origin = request.headers.get("origin");
-  const headers = corsHeaders(request) ?? {};
-  if (origin && !EXTENSION_ORIGIN.test(origin)) {
-    return NextResponse.json({ error: "origin not allowed" }, { status: 403 });
-  }
+  const rejected = rejectDisallowed(request);
+  if (rejected) return rejected;
+  const headers = extensionCorsHeaders(request);
 
   const body = await request.json().catch(() => null);
   if (!body?.title || typeof body.title !== "string") {
