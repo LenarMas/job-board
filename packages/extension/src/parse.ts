@@ -15,26 +15,43 @@ import type { CapturedJob } from "./types";
 export function parseJobPosting(doc: Document, pageUrl: string): CapturedJob {
   const url = canonicalUrl(doc, pageUrl);
 
+  let job: CapturedJob;
   const fromJsonLd = parseJsonLd(doc);
-  if (fromJsonLd) return { ...fromJsonLd, url };
-
-  if (isLinkedInHost(pageUrl)) {
-    const fromLinkedIn = parseLinkedInApp(doc);
-    if (fromLinkedIn) return { ...fromLinkedIn, url };
+  const fromLinkedIn =
+    !fromJsonLd && isLinkedInHost(pageUrl) ? parseLinkedInApp(doc) : null;
+  const fromSite =
+    !fromJsonLd && !fromLinkedIn ? parseSiteSelectors(doc, pageUrl) : null;
+  if (fromJsonLd) job = { ...fromJsonLd, url };
+  else if (fromLinkedIn) job = { ...fromLinkedIn, url };
+  else if (fromSite) job = { ...fromSite, url };
+  else {
+    job = {
+      title: cleanDocumentTitle(doc.title),
+      company: fallbackCompany(doc),
+      location: "",
+      salary: "",
+      description: "",
+      url,
+      source: "page-fallback",
+    };
   }
 
-  const fromSite = parseSiteSelectors(doc, pageUrl);
-  if (fromSite) return { ...fromSite, url };
+  // Boards like Greenhouse put the range only in the description prose and
+  // the company only in the page title — recover both rather than showing
+  // empty fields (the user reviews everything before saving anyway).
+  if (!job.salary && job.description) {
+    job.salary = salaryFromText(job.description) ?? "";
+  }
+  if (!job.company) job.company = fallbackCompany(doc);
+  return job;
+}
 
-  return {
-    title: cleanDocumentTitle(doc.title),
-    company: fallbackCompany(doc),
-    location: "",
-    salary: "",
-    description: "",
-    url,
-    source: "page-fallback",
-  };
+/** Find a compensation range like "$160,000 - $260,000 USD" in prose. */
+export function salaryFromText(text: string): string | null {
+  const match = text.match(
+    /[$€£]\s?\d{1,3}(?:[,.]\d{3})+(?:\.\d+)?(?:\s?[kK])?\s*(?:-|–|—|to)\s*[$€£]?\s?\d{1,3}(?:[,.]\d{3})+(?:\.\d+)?(?:\s?[kK])?(?:\s*(?:USD|EUR|GBP|CAD|per\s+\w+|\/\s*\w+))?/,
+  );
+  return match ? match[0].replace(/\s+/g, " ").trim() : null;
 }
 
 // ---------- JSON-LD ----------
@@ -339,8 +356,12 @@ function fallbackCompany(doc: Document): string {
   if (fromMeta) return fromMeta;
   const fromAnchor = linkedInCompanyAnchor(doc);
   if (fromAnchor) return fromAnchor;
-  const parts = cleanDocumentTitle(doc.title).split(" | ");
+  const title = cleanDocumentTitle(doc.title);
+  const parts = title.split(" | ");
   if (parts.length >= 3) return parts[parts.length - 2]!.trim();
+  // Greenhouse-style titles: "Job Application for <role> at <Company>"
+  const atMatch = title.match(/\bat ([^|–—]+)$/);
+  if (atMatch) return atMatch[1]!.trim();
   return "";
 }
 

@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+  <!-- Sanitized replica of the newer job-boards.*.greenhouse.io design:
+       no JSON-LD, no og:site_name; the company only appears in the page
+       title and the salary only in the description prose. Fictional data. -->
+  <title>Job Application for Staff Telemetry Platform Engineer at Glenharbor Compute</title>
+</head>
+<body>
+  <div class="job__header">
+    <div class="job__title"><h1>Staff Telemetry Platform Engineer</h1></div>
+    <div class="job__location">US</div>
+  </div>
+  <div class="job__description">
+    <p>About Glenharbor</p>
+    <p>Glenharbor Compute is a fictional GPU cloud for rendering studios.</p>
+    <p>As a Staff Telemetry Platform Engineer you will own metrics, logs, and traces end to end.</p>
+    <p>Salary Range</p>
+    <p>$150,000 - $240,000 USD</p>
+  </div>
+  <form id="application_form">
+    <label for="first_name">First Name</label><input id="first_name" name="job_application[first_name]" type="text" />
+    <label for="last_name">Last Name</label><input id="last_name" name="job_application[last_name]" type="text" />
+    <label for="email">Email</label><input id="email" name="job_application[email]" type="email" />
+    <label for="phone">Phone</label><input id="phone" name="job_application[phone]" type="tel" />
+    <label for="candidate-location">Location (City)</label><input id="candidate-location" type="text" />
+    <label for="question_1">LinkedIn Profile</label><input id="question_1" type="text" />
+    <label for="question_2">Website</label><input id="question_2" type="text" value="https://prefilled.example" />
+    <label for="resume">Resume/CV</label><input id="resume" type="file" />
+  </form>
+</body>
+</html>

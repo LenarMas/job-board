@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { normalizeLinkedInUrl, parseJobPosting, parseJsonLd } from "../src/parse";
+import { normalizeLinkedInUrl, parseJobPosting, parseJsonLd, salaryFromText } from "../src/parse";
 
 function loadFixture(name: string): Document {
   const html = fs.readFileSync(
@@ -145,6 +145,33 @@ describe("authenticated LinkedIn app", () => {
     expect(job.location).toBe("Remote, US");
     expect(job.location).not.toContain("Mistfall");
     expect(job.location).not.toContain("Platform Reliability Engineer");
+  });
+});
+
+describe("greenhouse job-boards design (no JSON-LD, no og metas)", () => {
+  const URL = "https://job-boards.eu.greenhouse.io/glenharborcompute/jobs/000007?gh_src=abc";
+
+  it("recovers company from the page title and salary from the description", () => {
+    const doc = loadFixture("greenhouse-eu");
+    const job = parseJobPosting(doc, URL);
+    expect(job.source).toBe("site-selectors");
+    expect(job.title).toBe("Staff Telemetry Platform Engineer");
+    expect(job.company).toBe("Glenharbor Compute"); // "…at <Company>" title pattern
+    expect(job.location).toBe("US");
+    expect(job.salary).toBe("$150,000 - $240,000 USD");
+    expect(job.description).toContain("metrics, logs, and traces");
+  });
+
+  it("extracts salary ranges from prose", () => {
+    expect(salaryFromText("The range is $150,000 - $240,000 USD annually")).toBe(
+      "$150,000 - $240,000 USD",
+    );
+    expect(salaryFromText("base of €80,000 to €95,000 for this role")).toBe(
+      "€80,000 to €95,000",
+    );
+    expect(salaryFromText("no numbers here")).toBeNull();
+    // plain years/counts must not look like salaries
+    expect(salaryFromText("founded in 2004, 10 to 50 employees")).toBeNull();
   });
 });
 

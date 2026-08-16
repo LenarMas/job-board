@@ -4,7 +4,6 @@
   "version": "0.1.0",
   "description": "One-click capture of job postings into your self-hosted JobTrack board.",
   "action": {
-    "default_popup": "popup.html",
     "default_title": "Capture job posting"
   },
   "background": {

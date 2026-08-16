@@ -1,10 +1,21 @@
 # JobTrack Capture — Chrome extension
 
 One-click capture of job postings into your JobTrack board. Click the toolbar
-button (or right-click → "Capture job posting") on any job page, review what
-was parsed, edit anything that's off, pick a stage, and save.
+button (or right-click → "Capture job posting") on any job page and a capture
+panel opens **in the page itself** — unlike a browser popup it stays open
+while you click around, scroll, or copy text from the posting, and your edits
+survive until you save or close it. Review what was parsed, edit anything
+that's off, pick a stage, and save; the confirmation links straight to the
+job in JobTrack.
 
-Nothing is saved without your review: the popup always shows exactly what was
+The panel also has an **Autofill application** button: save your details and
+resume once on JobTrack's Profile page (`http://localhost:3000/profile`) and
+it fills the application form on the page — name, email, phone, location,
+LinkedIn/GitHub/website — and attaches your resume to the upload field.
+Field recognition lives in one rules table (`src/autofill.ts`); it never
+overwrites anything already typed, and you review the form before submitting.
+
+Nothing is saved without your review: the panel always shows exactly what was
 parsed and how (JobPosting metadata, site-specific selectors, or a bare
 page-title fallback) before you hit Save.
 
