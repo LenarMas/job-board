@@ -262,6 +262,20 @@ describe("metrics", () => {
     expect(rows.untagged).toMatchObject({ jobs: 1, companies: 1 });
   });
 
+  it("deleting a stage event splices the chain and updates conversions", () => {
+    const job = svc.createJob({ title: "A", stageName: "wishlist", createdAt: daysAgo(10) });
+    svc.moveJob(job.id, { stageName: "applied" }, daysAgo(8));
+    svc.moveJob(job.id, { stageName: "offer" }, daysAgo(4)); // accidental click
+    svc.moveJob(job.id, { stageName: "rejected" }, daysAgo(2));
+    expect(svc.conversionRates().appliedToOffer).toBeGreaterThan(0);
+    const accidental = svc.listStageEvents(job.id).find((e) => e.to === "offer")!;
+    svc.deleteStageEvent(accidental.id);
+    const events = svc.listStageEvents(job.id);
+    expect(events.map((e) => e.to)).toEqual(["rejected", "applied", "wishlist"]);
+    expect(events[0]!.from).toBe("applied"); // spliced past the deleted move
+    expect(svc.conversionRates().appliedToOffer).toBe(0);
+  });
+
   it("lists stage events with names, newest first", () => {
     const job = svc.createJob({ title: "A", stageName: "wishlist", createdAt: daysAgo(5) });
     svc.moveJob(job.id, { stageName: "applied" }, daysAgo(3));

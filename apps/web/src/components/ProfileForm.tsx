@@ -43,12 +43,10 @@ export function ProfileForm({ initial }: { initial: ProfileData }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
-    setStatus(res.ok ? "Saved." : "Save failed.");
+    setStatus(res.ok ? "Saved." : `Save failed (${res.status}).`);
   }
 
-  async function uploadResume() {
-    const file = fileInput.current?.files?.[0];
-    if (!file) return;
+  async function uploadResume(file: File) {
     setStatus("Uploading resume…");
     const data = new FormData();
     data.set("file", file);
@@ -58,7 +56,8 @@ export function ProfileForm({ initial }: { initial: ProfileData }) {
       setResumeName(body.resumeFilename);
       setStatus("Resume uploaded.");
     } else {
-      setStatus("Resume upload failed.");
+      const body = await res.json().catch(() => null);
+      setStatus(`Resume upload failed${body?.error ? `: ${body.error}` : "."}`);
     }
     if (fileInput.current) fileInput.current.value = "";
   }
@@ -98,14 +97,18 @@ export function ProfileForm({ initial }: { initial: ProfileData }) {
             ref={fileInput}
             type="file"
             accept=".pdf,.doc,.docx,.txt"
-            className="text-sm"
+            className="hidden"
             aria-label="Choose resume file"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void uploadResume(file);
+            }}
           />
           <button
-            onClick={uploadResume}
+            onClick={() => fileInput.current?.click()}
             className="rounded-md border border-indigo-200 px-3 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50"
           >
-            {resumeName ? "Replace" : "Upload"}
+            {resumeName ? "Replace resume…" : "Upload resume…"}
           </button>
         </div>
       </div>

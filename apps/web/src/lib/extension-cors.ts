@@ -11,9 +11,16 @@ import { NextResponse } from "next/server";
 
 const EXTENSION_ORIGIN = /^chrome-extension:\/\/[a-p]{32}$/;
 const LOCALHOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+// Browsers send an Origin header on ALL non-GET requests, including
+// same-origin ones — the app's own pages must not be rejected.
+const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 
 export function isLocalhost(request: Request): boolean {
   return LOCALHOST.test(request.headers.get("host") ?? "");
+}
+
+function originAllowed(origin: string): boolean {
+  return EXTENSION_ORIGIN.test(origin) || LOCALHOST_ORIGIN.test(origin);
 }
 
 export function extensionCorsHeaders(request: Request): Record<string, string> {
@@ -33,7 +40,7 @@ export function rejectDisallowed(request: Request): NextResponse | null {
     return NextResponse.json({ error: "localhost only" }, { status: 403 });
   }
   const origin = request.headers.get("origin");
-  if (origin && !EXTENSION_ORIGIN.test(origin)) {
+  if (origin && !originAllowed(origin)) {
     return NextResponse.json({ error: "origin not allowed" }, { status: 403 });
   }
   return null;

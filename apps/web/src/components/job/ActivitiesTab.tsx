@@ -56,6 +56,13 @@ export function ActivitiesTab({
     router.refresh();
   }
 
+  async function removeStageEvent(id: number) {
+    if (!confirm("Remove this stage change from the history? Metrics recompute without it."))
+      return;
+    await fetch(`/api/stage-events/${id}`, { method: "DELETE" });
+    router.refresh();
+  }
+
   const now = Date.now();
   const pending = activities.filter((a) => !a.completedAt);
   const completed = activities.filter((a) => a.completedAt);
@@ -172,6 +179,14 @@ export function ActivitiesTab({
                 <span className="ml-auto text-xs text-slate-400">
                   {e.movedAt.slice(0, 10)}
                 </span>
+                <button
+                  onClick={() => removeStageEvent(e.id)}
+                  className="text-xs text-slate-300 hover:text-red-500"
+                  aria-label="Remove this stage change"
+                  title="Remove accidental move"
+                >
+                  ✕
+                </button>
               </li>
             ))}
           </ul>

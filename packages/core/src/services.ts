@@ -709,6 +709,40 @@ export function createServices(db: Db) {
       }));
   }
 
+  /**
+   * Remove one stage change from a job's history (e.g. an accidental move),
+   * splicing the chain so the following event's "from" points at the stage
+   * before the deleted one. All history-derived metrics recompute from the
+   * corrected chain.
+   */
+  function deleteStageEvent(id: number) {
+    db.transaction(() => {
+      const event = db.select().from(stageEvents).where(eq(stageEvents.id, id)).get();
+      if (!event) return;
+      const next = db
+        .select()
+        .from(stageEvents)
+        .where(
+          and(
+            eq(stageEvents.jobId, event.jobId),
+            eq(stageEvents.fromStageId, event.toStageId),
+            sql`${stageEvents.movedAt} >= ${event.movedAt.getTime()}`,
+            sql`${stageEvents.id} != ${event.id}`,
+          ),
+        )
+        .orderBy(asc(stageEvents.movedAt))
+        .limit(1)
+        .all()[0];
+      if (next) {
+        db.update(stageEvents)
+          .set({ fromStageId: event.fromStageId })
+          .where(eq(stageEvents.id, next.id))
+          .run();
+      }
+      db.delete(stageEvents).where(eq(stageEvents.id, id)).run();
+    });
+  }
+
   /** Stage-change history for one job, with stage names, newest first. */
   function listStageEvents(jobId: number) {
     const stageById = new Map(db.select().from(stages).all().map((s) => [s.id, s.name]));
@@ -780,6 +814,7 @@ export function createServices(db: Db) {
     interviewFunnel,
     sourceBreakdown,
     listStageEvents,
+    deleteStageEvent,
     totalsPerStage,
     applicationsPerWeek,
     conversionRates,
