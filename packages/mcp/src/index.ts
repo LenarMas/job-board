@@ -85,6 +85,7 @@ server.tool(
       `location: ${job.location ?? "—"}`,
       `salary: ${job.salary ?? "—"}`,
       `url: ${job.url ?? "—"}`,
+      `source: ${job.source ?? "untagged"}`,
       `created: ${fmtDate(job.createdAt)}  applied: ${fmtDate(job.appliedAt)}  rejected: ${fmtDate(job.rejectedAt)}`,
     ];
     if (activities.length > 0) {

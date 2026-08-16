@@ -10,9 +10,10 @@ layer.
 |---|---|
 | `list_jobs(stage?, query?)` | List jobs, optionally by stage or text filter |
 | `get_job(id)` | Full details for one job |
-| `add_job(title, company?, stage?, ...)` | Create a job |
+| `add_job(title, company?, stage?, source?, ...)` | Create a job |
 | `move_job(id, stage)` | Move a job between stages |
-| `log_activity(job_id, category, title, ...)` | Log an apply/interview/follow-up/offer activity |
+| `set_source(job_id, source)` | Record how a job originated: applied, reachout, referral, other |
+| `log_activity(job_id, category, title, ...)` | Log an activity — categories: apply, screen, interview, hm, technical, final, follow_up, offer, other |
 | `add_note(job_id, body)` | Add a markdown note |
 | `search(query)` | Search titles, companies, locations |
 | `get_metrics()` | Stage totals, conversion rates, response rate, weekly applications |
