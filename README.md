@@ -21,14 +21,19 @@ update your board straight from an AI chat.
   [migration/README.md](migration/README.md).
 - **MCP server** — add jobs, move cards, log interviews, and pull metrics from
   an AI chat. See [packages/mcp/README.md](packages/mcp/README.md).
+- **Chrome extension** — one-click capture of job postings from LinkedIn,
+  Greenhouse, Lever, Ashby, Workday, Indeed, and any page with JobPosting
+  metadata, with review before saving — plus one-click application autofill
+  from your saved profile and resume. See
+  [packages/extension/README.md](packages/extension/README.md).
 
 ## Quick start
 
 Requires Node 20+.
 
 ```sh
-git clone <this repo>
-cd jobtrack
+git clone https://github.com/LenarMas/job-board.git
+cd job-board
 npm install
 npm run seed   # fictional demo data
 npm run dev
@@ -48,10 +53,11 @@ mounted as volumes in the compose setup and are gitignored.
 ## Layout
 
 ```
-apps/web        Next.js app (board UI, API routes)
-packages/core   schema, db client, service layer, seed
-packages/mcp    MCP server (stdio)
-migration/      CSV importer (raw exports go in migration/raw/, gitignored)
+apps/web            Next.js app (board UI, API routes)
+packages/core       schema, db client, service layer, seed
+packages/mcp        MCP server (stdio)
+packages/extension  Chrome extension (job capture + application autofill)
+migration/          CSV importer (raw exports go in migration/raw/, gitignored)
 ```
 
 ## Commands
