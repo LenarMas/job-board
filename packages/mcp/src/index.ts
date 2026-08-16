@@ -11,6 +11,7 @@ import path from "node:path";
 import { z } from "zod";
 import {
   activityCategories,
+  classifyInterviewTitle,
   createDb,
   createServices,
   DEFAULT_STAGES,
@@ -192,6 +193,72 @@ server.tool(
       completedAt: completed ? new Date() : undefined,
     });
     return text(`Logged ${category} activity #${activity.id} on job #${job_id}.`);
+  },
+);
+
+server.tool(
+  "list_activities",
+  "List activities across the board (or one job). category filters exactly; category 'unclassified' returns generic interview activities that no round type can be derived for — the ones the metrics funnel reports as unclassified. Use update_activity to retag them.",
+  {
+    category: z.enum([...activityCategories, "unclassified"]).optional(),
+    job_id: z.number().int().optional(),
+  },
+  async ({ category, job_id }) => {
+    const rows = svc.listActivitiesAcrossJobs({
+      jobId: job_id,
+      category:
+        category && category !== "unclassified"
+          ? category
+          : category === "unclassified"
+            ? "interview"
+            : undefined,
+    });
+    const filtered =
+      category === "unclassified"
+        ? rows.filter((r) => classifyInterviewTitle(r.title) === null)
+        : rows;
+    if (filtered.length === 0) return text("No matching activities.");
+    const MAX = 200;
+    const lines = filtered.slice(0, MAX).map((r) => {
+      const status = r.completedAt
+        ? `done ${fmtDate(r.completedAt)}`
+        : r.dueAt
+          ? `due ${fmtDate(r.dueAt)}`
+          : fmtDate(r.createdAt);
+      const company = r.companyName ? ` @ ${r.companyName}` : "";
+      return `activity #${r.id} [${r.category}] ${r.title} — job #${r.jobId} ${r.jobTitle}${company} (${status})`;
+    });
+    const more =
+      filtered.length > MAX ? `\n…and ${filtered.length - MAX} more (narrow the filter)` : "";
+    return text(`${filtered.length} activities:\n${lines.join("\n")}${more}`);
+  },
+);
+
+server.tool(
+  "update_activity",
+  "Update an existing activity in place: retag its category (apply, screen, interview, hm, technical, final, follow_up, offer, other), rename it, edit the note, change the due date, or mark it complete/incomplete.",
+  {
+    activity_id: z.number().int(),
+    category: z.enum(activityCategories).optional(),
+    title: z.string().optional(),
+    note: z.string().optional(),
+    due_at: z.string().optional().describe("ISO date, e.g. 2026-08-20"),
+    completed: z.boolean().optional(),
+  },
+  async ({ activity_id, category, title, note, due_at, completed }) => {
+    const patch: Record<string, unknown> = {};
+    if (category !== undefined) patch.category = category;
+    if (title !== undefined) patch.title = title;
+    if (note !== undefined) patch.note = note;
+    if (due_at !== undefined) patch.dueAt = due_at ? new Date(due_at) : null;
+    if (completed !== undefined) patch.completedAt = completed ? new Date() : null;
+    if (Object.keys(patch).length === 0) return text("Nothing to update.");
+    const updated = svc.updateActivity(activity_id, patch);
+    if (!updated) return text(`No activity with id ${activity_id}.`);
+    return text(
+      `Updated activity #${updated.id}: [${updated.category}] ${updated.title}` +
+        (updated.completedAt ? ` (done ${fmtDate(updated.completedAt)})` : ""),
+    );
   },
 );
 

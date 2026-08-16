@@ -14,6 +14,8 @@ layer.
 | `move_job(id, stage)` | Move a job between stages |
 | `set_source(job_id, source)` | Record how a job originated: applied, reachout, referral, other |
 | `log_activity(job_id, category, title, ...)` | Log an activity — categories: apply, screen, interview, hm, technical, final, follow_up, offer, other |
+| `list_activities(category?, job_id?)` | List activities board-wide; `category: "unclassified"` finds interviews with no round type |
+| `update_activity(activity_id, ...)` | Retag, rename, re-date, or complete an existing activity |
 | `add_note(job_id, body)` | Add a markdown note |
 | `search(query)` | Search titles, companies, locations |
 | `get_metrics()` | Stage totals, conversion rates, response rate, weekly applications |

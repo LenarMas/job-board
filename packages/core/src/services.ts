@@ -26,6 +26,27 @@ export const DEFAULT_STAGES = [
 
 const POSITION_GAP = 1024;
 
+/**
+ * Classify an interview-ish activity title into a round type. Used by the
+ * metrics funnel and by tooling that filters for the activities the funnel
+ * reports as unclassified.
+ */
+const ROUND_PATTERNS = {
+  screen: /phone screen|phone interview|screening|recruiter (call|screen|chat)|intro call/i,
+  hm: /hiring manager|\bhm\b/i,
+  technical: /technical|coding|system design|pair programming|take[- ]home|architecture/i,
+  final: /final|onsite|on-site|panel/i,
+} as const;
+
+export function classifyInterviewTitle(
+  title: string,
+): "screen" | "hm" | "technical" | "final" | null {
+  for (const key of ["screen", "hm", "technical", "final"] as const) {
+    if (ROUND_PATTERNS[key].test(title)) return key;
+  }
+  return null;
+}
+
 export function createServices(db: Db) {
   // ---- boards / stages ----
 
@@ -318,6 +339,34 @@ export function createServices(db: Db) {
       .select()
       .from(activities)
       .where(eq(activities.jobId, jobId))
+      .orderBy(desc(activities.createdAt))
+      .all();
+  }
+
+  /** Activities across the whole board, with job and company context. */
+  function listActivitiesAcrossJobs(
+    filter: { jobId?: number; category?: ActivityCategory } = {},
+  ) {
+    const conditions = [];
+    if (filter.jobId) conditions.push(eq(activities.jobId, filter.jobId));
+    if (filter.category) conditions.push(eq(activities.category, filter.category));
+    return db
+      .select({
+        id: activities.id,
+        jobId: activities.jobId,
+        category: activities.category,
+        title: activities.title,
+        note: activities.note,
+        dueAt: activities.dueAt,
+        completedAt: activities.completedAt,
+        createdAt: activities.createdAt,
+        jobTitle: jobs.title,
+        companyName: companies.name,
+      })
+      .from(activities)
+      .innerJoin(jobs, eq(activities.jobId, jobs.id))
+      .leftJoin(companies, eq(jobs.companyId, companies.id))
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(activities.createdAt))
       .all();
   }
@@ -649,13 +698,6 @@ export function createServices(db: Db) {
    * the title. Whatever can't be classified is reported as such rather than
    * guessed.
    */
-  const ROUND_PATTERNS: Record<string, RegExp> = {
-    screen: /phone screen|phone interview|screening|recruiter (call|screen|chat)|intro call/i,
-    hm: /hiring manager|\bhm\b/i,
-    technical: /technical|coding|system design|pair programming|take[- ]home|architecture/i,
-    final: /final|onsite|on-site|panel/i,
-  };
-
   function interviewFunnel() {
     const rows = db
       .select({ category: activities.category, title: activities.title })
@@ -670,10 +712,11 @@ export function createServices(db: Db) {
       if (row.category === "technical") { funnel.technicalRounds++; continue; }
       if (row.category === "final") { funnel.finalRounds++; continue; }
       // Generic "interview" (or interview-looking "other"): classify by title.
-      if (ROUND_PATTERNS.screen!.test(row.title)) funnel.screens++;
-      else if (ROUND_PATTERNS.hm!.test(row.title)) funnel.hmRounds++;
-      else if (ROUND_PATTERNS.technical!.test(row.title)) funnel.technicalRounds++;
-      else if (ROUND_PATTERNS.final!.test(row.title)) funnel.finalRounds++;
+      const round = classifyInterviewTitle(row.title);
+      if (round === "screen") funnel.screens++;
+      else if (round === "hm") funnel.hmRounds++;
+      else if (round === "technical") funnel.technicalRounds++;
+      else if (round === "final") funnel.finalRounds++;
       else if (row.category === "interview") funnel.unclassifiedInterviews++;
       // an unmatched "other" is not an interview — skip it
     }
@@ -789,6 +832,7 @@ export function createServices(db: Db) {
     moveJob,
     boardSnapshot,
     listActivities,
+    listActivitiesAcrossJobs,
     createActivity,
     updateActivity,
     deleteActivity,
