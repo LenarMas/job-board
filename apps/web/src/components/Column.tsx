@@ -42,7 +42,10 @@ export function Column({
   }
 
   return (
-    <div className="flex w-72 shrink-0 flex-col rounded-lg bg-slate-100">
+    // Columns share the viewport width so a five-column board never needs
+    // horizontal scrolling; min-w keeps them usable on narrow windows (where
+    // the board container falls back to scrolling).
+    <div className="flex min-w-56 flex-1 basis-0 flex-col rounded-lg bg-slate-100">
       <div className="flex items-baseline justify-between px-3 pt-3">
         <h2 className="text-sm font-semibold tracking-wide text-slate-700 uppercase">
           {STAGE_LABELS[stage.name] ?? stage.name}

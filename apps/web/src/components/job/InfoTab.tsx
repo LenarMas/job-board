@@ -55,7 +55,19 @@ export function InfoTab({ job }: { job: JobDetailData }) {
         <input className={field} value={form.location} onChange={(e) => set("location", e.target.value)} />
       </label>
       <label className="block text-sm">
-        <span className="text-slate-600">Post URL</span>
+        <span className="flex items-baseline justify-between text-slate-600">
+          Post URL
+          {form.url && (
+            <a
+              href={form.url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-medium text-indigo-600 hover:underline"
+            >
+              open ↗
+            </a>
+          )}
+        </span>
         <input className={field} value={form.url} onChange={(e) => set("url", e.target.value)} />
       </label>
       <label className="block text-sm">
