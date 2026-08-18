@@ -1,7 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { normalizeLinkedInUrl, parseJobPosting, parseJsonLd, salaryFromText } from "../src/parse";
+import {
+  canonicalUrl,
+  normalizeLinkedInUrl,
+  parseJobPosting,
+  parseJsonLd,
+  salaryFromText,
+  stripTrackingParams,
+} from "../src/parse";
 
 function loadFixture(name: string): Document {
   const html = fs.readFileSync(
@@ -172,6 +179,40 @@ describe("greenhouse job-boards design (no JSON-LD, no og metas)", () => {
     expect(salaryFromText("no numbers here")).toBeNull();
     // plain years/counts must not look like salaries
     expect(salaryFromText("founded in 2004, 10 to 50 employees")).toBeNull();
+  });
+});
+
+describe("URL canonicalization on embedded boards", () => {
+  it("keeps the page URL when the canonical link drops the job id", () => {
+    // CoreWeave-style Greenhouse embed: canonical points at the generic board.
+    const doc = new DOMParser().parseFromString(
+      '<html><head><link rel="canonical" href="https://www.glenharbor.example/careers/job" /></head><body></body></html>',
+      "text/html",
+    );
+    const url = canonicalUrl(
+      doc,
+      "https://www.glenharbor.example/careers/job?4569000001&gh_jid=4569000001&src=LinkedIn",
+    );
+    expect(url).toContain("gh_jid=4569000001"); // dedupe key survives
+    expect(url).not.toContain("src=LinkedIn"); // tracking dropped
+  });
+
+  it("uses the canonical link when it still identifies the job", () => {
+    const doc = new DOMParser().parseFromString(
+      '<html><head><link rel="canonical" href="https://boards.example-ats.io/x/jobs/4569000001" /></head><body></body></html>',
+      "text/html",
+    );
+    expect(canonicalUrl(doc, "https://www.glenharbor.example/careers/job?gh_jid=4569000001")).toBe(
+      "https://boards.example-ats.io/x/jobs/4569000001",
+    );
+  });
+
+  it("strips tracking params but keeps meaningful ones", () => {
+    expect(
+      stripTrackingParams(
+        "https://a.example/j?gh_jid=42&utm_source=li&gh_src=abc&trackingId=xyz&page=2",
+      ),
+    ).toBe("https://a.example/j?gh_jid=42&page=2");
   });
 });
 

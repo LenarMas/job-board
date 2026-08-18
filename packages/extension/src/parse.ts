@@ -312,12 +312,51 @@ function metaContent(doc: Document, property: string): string | null {
   return el?.getAttribute("content")?.trim() || null;
 }
 
+// Query params that identify WHICH job a page shows (Greenhouse embeds use
+// gh_jid on the host company's own domain). These must survive
+// canonicalization or every job on that site dedupes into one.
+const JOB_ID_PARAMS = /(?:^|[?&])(gh_jid|jid|job_?id|posting_?id|currentJobId)=(\d+)/i;
+// Pure tracking params, safe to drop for a stable dedupe key.
+const TRACKING_PARAMS = /^(utm_\w+|gh_src|src|ref|refId|trackingId|trk|source)$/i;
+
 export function canonicalUrl(doc: Document, pageUrl: string): string {
   const canonical = doc
     .querySelector('link[rel="canonical"]')
-    ?.getAttribute("href");
-  const url = canonical?.trim() || pageUrl;
-  return normalizeLinkedInUrl(url);
+    ?.getAttribute("href")
+    ?.trim();
+  let url = canonical || pageUrl;
+  // A canonical link that drops the job id points at the generic board page —
+  // keep the real URL instead.
+  const idMatch = pageUrl.match(JOB_ID_PARAMS);
+  if (canonical && idMatch && !canonical.includes(idMatch[2]!)) {
+    url = pageUrl;
+  }
+  return normalizeLinkedInUrl(stripTrackingParams(url));
+}
+
+export function stripTrackingParams(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const toDelete = [...parsed.searchParams.keys()].filter((k) =>
+      TRACKING_PARAMS.test(k),
+    );
+    for (const key of toDelete) parsed.searchParams.delete(key);
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+/** Rank parse results when several frames each produce one. */
+export function scoreJob(job: CapturedJob): number {
+  let s = 0;
+  if (job.title) s += 2;
+  if (job.company) s += 2;
+  if (job.location) s += 1;
+  if (job.salary) s += 1;
+  if (job.description) s += 3;
+  if (job.source !== "page-fallback") s += 2;
+  return s;
 }
 
 /**

@@ -1,27 +1,37 @@
-// Service worker. The capture UI is an in-page panel (content script), so the
-// toolbar button and the context menu both just toggle it. Saves are routed
-// through here because content scripts fetch with the page's origin, which
-// the JobTrack API (correctly) refuses.
+// Service worker. Injects the content script into EVERY frame (job boards are
+// often embedded in an iframe on the company's own careers page), toggles the
+// top-frame panel by direct function invocation (no messaging race on the
+// first click), fans scrape/autofill out across frames, and performs all
+// JobTrack API calls (content scripts fetch with the page's origin, which the
+// API correctly refuses).
 
 const APP_URL = "http://localhost:3000";
 
+function flashBadge(tabId: number) {
+  chrome.action.setBadgeText({ tabId, text: "✕" });
+  setTimeout(() => chrome.action.setBadgeText({ tabId, text: "" }), 2000);
+}
+
 async function togglePanel(tab: chrome.tabs.Tab | undefined) {
   if (!tab?.id) return;
+  const tabId = tab.id;
   if (tab.url && !/^https?:/.test(tab.url)) {
-    // Can't inject into chrome:// pages and the like.
-    chrome.action.setBadgeText({ tabId: tab.id, text: "✕" });
-    setTimeout(() => chrome.action.setBadgeText({ tabId: tab.id!, text: "" }), 2000);
+    flashBadge(tabId); // chrome:// pages and the like can't be captured
     return;
   }
   try {
     await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
+      target: { tabId, allFrames: true },
       files: ["content.js"],
     });
-    await chrome.tabs.sendMessage(tab.id, { type: "jobtrack-toggle-panel" });
+    // Direct invocation instead of tabs.sendMessage: the function is defined
+    // synchronously by content.js, so there is no listener-registration race.
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => (window as { __jobtrackTogglePanel?: () => void }).__jobtrackTogglePanel?.(),
+    });
   } catch {
-    chrome.action.setBadgeText({ tabId: tab.id, text: "✕" });
-    setTimeout(() => chrome.action.setBadgeText({ tabId: tab.id!, text: "" }), 2000);
+    flashBadge(tabId);
   }
 }
 
@@ -39,7 +49,111 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === "jobtrack-capture") void togglePanel(tab);
 });
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+async function scrapeFrames(tabId: number) {
+  const injections = await chrome.scripting.executeScript({
+    target: { tabId, allFrames: true },
+    func: () =>
+      (window as { __jobtrackScrape?: () => unknown }).__jobtrackScrape?.() ?? null,
+  });
+  return injections.map((i) => i.result ?? null);
+}
+
+async function fetchProfile() {
+  const res = await fetch(`${APP_URL}/api/profile`);
+  if (!res.ok) throw new Error(`profile request failed (${res.status})`);
+  const profile = await res.json();
+  let resume: { name: string; mime: string; base64: string } | null = null;
+  if (profile?.resumeFilename) {
+    const fileRes = await fetch(`${APP_URL}/api/profile/resume`);
+    if (fileRes.ok) {
+      const bytes = new Uint8Array(await fileRes.arrayBuffer());
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      }
+      resume = {
+        name: profile.resumeFilename,
+        mime: fileRes.headers.get("content-type") ?? "application/octet-stream",
+        base64: btoa(binary),
+      };
+    }
+  }
+  return { profile, resume };
+}
+
+async function autofillFrames(tabId: number) {
+  const { profile, resume } = await fetchProfile();
+  const FILL_FIELDS = [
+    "firstName", "lastName", "email", "phone",
+    "location", "linkedin", "github", "website",
+  ];
+  const hasAny = FILL_FIELDS.some(
+    (k) => typeof profile?.[k] === "string" && profile[k].trim(),
+  );
+  if (!hasAny && !resume) {
+    return {
+      ok: false,
+      error: `No saved profile yet — fill it in at ${APP_URL}/profile first.`,
+    };
+  }
+  const injections = await chrome.scripting.executeScript({
+    target: { tabId, allFrames: true },
+    func: (p, r) =>
+      (
+        window as {
+          __jobtrackAutofill?: (p: unknown, r: unknown) => { filled: number; resumeAttached: boolean };
+        }
+      ).__jobtrackAutofill?.(p, r) ?? null,
+    args: [profile, resume],
+  });
+  let filled = 0;
+  let resumeAttached = false;
+  for (const i of injections) {
+    const r = i.result as { filled: number; resumeAttached: boolean } | null;
+    if (r) {
+      filled += r.filled;
+      resumeAttached ||= r.resumeAttached;
+    }
+  }
+  let resumeNote = "";
+  if (resume) {
+    resumeNote = resumeAttached
+      ? ` · attached ${resume.name}`
+      : " · no resume field found on this page";
+  }
+  if (filled === 0 && !resumeAttached) {
+    return { ok: false, error: "No application fields recognized on this page." };
+  }
+  return {
+    ok: true,
+    summary: `Filled ${filled} field${filled === 1 ? "" : "s"}${resumeNote}. Review before submitting.`,
+  };
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const tabId = sender.tab?.id;
+
+  if (message?.type === "jobtrack-scrape-frames" && tabId) {
+    scrapeFrames(tabId)
+      .then((results) => sendResponse({ ok: true, results }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (message?.type === "jobtrack-autofill" && tabId) {
+    autofillFrames(tabId)
+      .then(sendResponse)
+      .catch((err) =>
+        sendResponse({
+          ok: false,
+          error:
+            `Could not reach JobTrack at ${APP_URL}. Is the app running? (npm run dev)\n` +
+            (err instanceof Error ? err.message : String(err)),
+        }),
+      );
+    return true;
+  }
+
   if (message?.type === "jobtrack-save") {
     fetch(`${APP_URL}/api/jobs/capture`, {
       method: "POST",
@@ -62,41 +176,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             (err instanceof Error ? err.message : String(err)),
         }),
       );
-    return true;
-  }
-  if (message?.type === "jobtrack-profile") {
-    (async () => {
-      try {
-        const res = await fetch(`${APP_URL}/api/profile`);
-        if (!res.ok) throw new Error(`profile request failed (${res.status})`);
-        const profile = await res.json();
-        let resume: { name: string; mime: string; base64: string } | null = null;
-        if (profile?.resumeFilename) {
-          const fileRes = await fetch(`${APP_URL}/api/profile/resume`);
-          if (fileRes.ok) {
-            const buf = await fileRes.arrayBuffer();
-            let binary = "";
-            const bytes = new Uint8Array(buf);
-            for (let i = 0; i < bytes.length; i += 0x8000) {
-              binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-            }
-            resume = {
-              name: profile.resumeFilename,
-              mime: fileRes.headers.get("content-type") ?? "application/octet-stream",
-              base64: btoa(binary),
-            };
-          }
-        }
-        sendResponse({ ok: true, profile, resume, appUrl: APP_URL });
-      } catch (err) {
-        sendResponse({
-          ok: false,
-          error:
-            `Could not reach JobTrack at ${APP_URL}. Is the app running? (npm run dev)\n` +
-            (err instanceof Error ? err.message : String(err)),
-        });
-      }
-    })();
     return true;
   }
 });
