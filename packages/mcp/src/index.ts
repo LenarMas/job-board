@@ -147,6 +147,90 @@ server.tool(
 );
 
 server.tool(
+  "update_job",
+  "Update a job's fields in place. Patch semantics: only the fields you provide change; everything else is untouched. Reversible by updating again. Company is matched or created by name.",
+  {
+    id: z.number().int(),
+    title: z.string().optional(),
+    company: z.string().optional(),
+    location: z.string().optional(),
+    salary: z.string().optional(),
+    url: z.string().optional(),
+    description: z.string().optional(),
+    source: z.enum(jobSources).optional(),
+    applied_at: z.string().optional().describe("ISO date, e.g. 2026-07-01; empty string clears it"),
+  },
+  async ({ id, applied_at, ...rest }) => {
+    const patch: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(rest)) {
+      if (value !== undefined) patch[key] = value;
+    }
+    if (applied_at !== undefined) {
+      patch.appliedAt = applied_at ? new Date(applied_at) : null;
+    }
+    if (Object.keys(patch).length === 0) return text("Nothing to update.");
+    const updated = svc.updateJob(id, patch);
+    if (!updated) return text(`No job with id ${id}.`);
+    return text(`Updated job #${id}. ${fmtJobLine({ ...updated, companyName: undefined })}`);
+  },
+);
+
+server.tool(
+  "archive_job",
+  "Archive a job (reversible soft delete): it disappears from the board, search, and metrics but keeps all its activities and notes. Undo with restore_job. Use this to remove duplicates — there is no hard delete over MCP.",
+  { id: z.number().int() },
+  async ({ id }) => {
+    const job = svc.getJob(id);
+    if (!job) return text(`No job with id ${id}.`);
+    svc.archiveJob(id);
+    return text(`Archived job #${id} (${job.title}). Restore any time with restore_job.`);
+  },
+);
+
+server.tool(
+  "restore_job",
+  "Restore an archived job to the board, fully intact. Reversible (archive again).",
+  { id: z.number().int() },
+  async ({ id }) => {
+    const restored = svc.restoreJob(id);
+    if (!restored) return text(`No job with id ${id}.`);
+    return text(`Restored job #${id} (${restored.title}) to the board.`);
+  },
+);
+
+server.tool(
+  "list_archived",
+  "List archived jobs (the ones hidden from the board and metrics). Read-only.",
+  {},
+  async () => {
+    const rows = svc.listArchived();
+    if (rows.length === 0) return text("No archived jobs.");
+    const lines = rows.map(
+      (j) =>
+        `#${j.id} ${j.title}${j.companyName ? ` @ ${j.companyName}` : ""} (archived ${fmtDate(j.archivedAt)})`,
+    );
+    return text(`${rows.length} archived jobs:\n${lines.join("\n")}`);
+  },
+);
+
+server.tool(
+  "merge_jobs",
+  "Consolidate a duplicate: moves ALL activities and notes from the source job to the target, keeps the target's stage, fills any empty target field (url, salary, location, description, source, applied date) from the source, records the merge as a note, and archives the source. Mostly reversible: the source can be restored, but moved activities and notes stay on the target. Refuses self-merges and archived participants.",
+  { source_id: z.number().int(), target_id: z.number().int() },
+  async ({ source_id, target_id }) => {
+    try {
+      const merged = svc.mergeJobs(source_id, target_id);
+      return text(
+        `Merged job #${source_id} into #${target_id} (${merged.title}). ` +
+          `Source archived; activities and notes moved; target stage kept.`,
+      );
+    } catch (err) {
+      return text(err instanceof Error ? err.message : "merge failed");
+    }
+  },
+);
+
+server.tool(
   "set_source",
   "Record how a job originated: applied (cold application), reachout (a recruiter contacted you, e.g. on LinkedIn), referral, or other. Drives the source breakdown in metrics.",
   { job_id: z.number().int(), source: z.enum(jobSources) },
@@ -259,6 +343,39 @@ server.tool(
       `Updated activity #${updated.id}: [${updated.category}] ${updated.title}` +
         (updated.completedAt ? ` (done ${fmtDate(updated.completedAt)})` : ""),
     );
+  },
+);
+
+server.tool(
+  "delete_activity",
+  "DESTRUCTIVE and irreversible: permanently deletes one activity (e.g. one logged by mistake). Prefer update_activity to correct instead of delete when the event actually happened.",
+  { activity_id: z.number().int() },
+  async ({ activity_id }) => {
+    const existing = svc.listActivitiesAcrossJobs().find((a) => a.id === activity_id);
+    if (!existing) return text(`No activity with id ${activity_id}.`);
+    svc.deleteActivity(activity_id);
+    return text(`Deleted activity #${activity_id} ([${existing.category}] ${existing.title}).`);
+  },
+);
+
+server.tool(
+  "update_note",
+  "Replace a note's text in place. Reversible by updating again (the previous text is overwritten, so quote it back if you need to preserve it).",
+  { note_id: z.number().int(), body: z.string() },
+  async ({ note_id, body }) => {
+    const updated = svc.updateNote(note_id, body);
+    if (!updated) return text(`No note with id ${note_id}.`);
+    return text(`Updated note #${note_id}.`);
+  },
+);
+
+server.tool(
+  "delete_note",
+  "DESTRUCTIVE and irreversible: permanently deletes one note.",
+  { note_id: z.number().int() },
+  async ({ note_id }) => {
+    svc.deleteNote(note_id);
+    return text(`Deleted note #${note_id} (if it existed).`);
   },
 );
 

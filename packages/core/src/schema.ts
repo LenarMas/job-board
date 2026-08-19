@@ -71,6 +71,9 @@ export const jobs = sqliteTable(
     createdAt: createdAt(),
     appliedAt: integer("applied_at", { mode: "timestamp_ms" }),
     rejectedAt: integer("rejected_at", { mode: "timestamp_ms" }),
+    // Soft delete: archived jobs keep their children but drop out of the
+    // board, search, and metrics unless explicitly requested.
+    archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
     // How the opportunity originated (cold application vs recruiter reachout
     // vs referral); null means untagged.
     source: text("source", { enum: jobSources }),

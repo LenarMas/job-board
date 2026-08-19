@@ -9,10 +9,10 @@ import { CompanyLogo } from "./CompanyLogo";
 
 export const JobCard = memo(function JobCard({
   job,
-  onDelete,
+  onArchive,
 }: {
   job: BoardJob;
-  onDelete?: (id: number) => void;
+  onArchive?: (id: number) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: job.id, data: { type: "job", stageId: job.stageId } });
@@ -40,19 +40,21 @@ export const JobCard = memo(function JobCard({
       {...listeners}
     >
       <div className="absolute top-1.5 right-1.5 flex flex-col gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-        {onDelete && (
+        {onArchive && (
+          // Archiving is reversible (restore from the Archived page), so no
+          // confirmation dialog is needed here.
           <button
             {...shield}
             onClick={(e) => {
               e.stopPropagation();
-              if (confirm(`Delete "${job.title}"?`)) onDelete(job.id);
+              onArchive(job.id);
             }}
-            className="rounded border border-slate-200 bg-white p-1 text-slate-400 shadow-sm hover:border-red-200 hover:text-red-500"
-            aria-label={`Delete ${job.title}`}
-            title="Delete"
+            className="rounded border border-slate-200 bg-white p-1 text-slate-400 shadow-sm hover:border-amber-300 hover:text-amber-600"
+            aria-label={`Archive ${job.title}`}
+            title="Archive (reversible)"
           >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M2.5 4h11M6.5 4V2.5h3V4m-6 0 .5 9.5h8L12.5 4M6.5 7v4M9.5 7v4" />
+              <path d="M2 3h12v3H2zM3 6v7h10V6M6.5 9h3" />
             </svg>
           </button>
         )}

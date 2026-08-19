@@ -128,12 +128,12 @@ export function Board({ initial }: { initial: BoardSnapshot }) {
     if (!res.ok) await refresh();
   }
 
-  async function handleDelete(id: number) {
-    // Optimistic removal; refresh reconciles.
+  async function handleArchive(id: number) {
+    // Optimistic removal; archive is reversible from /archived.
     setStages((prev) =>
       prev.map((s) => ({ ...s, jobs: s.jobs.filter((j) => j.id !== id) })),
     );
-    await fetch(`/api/jobs/${id}`, { method: "DELETE" });
+    await fetch(`/api/jobs/${id}/archive`, { method: "POST" });
     await refresh();
   }
 
@@ -191,7 +191,7 @@ export function Board({ initial }: { initial: BoardSnapshot }) {
               stage={stage}
               jobs={stage.jobs}
               onQuickAdd={handleQuickAdd}
-              onDelete={handleDelete}
+              onArchive={handleArchive}
             />
           ))}
         </div>

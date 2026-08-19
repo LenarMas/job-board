@@ -18,12 +18,12 @@ export function Column({
   stage,
   jobs,
   onQuickAdd,
-  onDelete,
+  onArchive,
 }: {
   stage: BoardStage;
   jobs: BoardJob[];
   onQuickAdd: (stageId: number, title: string, company: string) => Promise<void>;
-  onDelete: (id: number) => void;
+  onArchive: (id: number) => void;
 }) {
   const { setNodeRef } = useDroppable({
     id: `stage-${stage.id}`,
@@ -110,7 +110,7 @@ export function Column({
           className="mt-2 flex min-h-16 flex-1 flex-col gap-2 overflow-y-auto px-3 pb-3"
         >
           {jobs.map((job) => (
-            <JobCard key={job.id} job={job} onDelete={onDelete} />
+            <JobCard key={job.id} job={job} onArchive={onArchive} />
           ))}
         </div>
       </SortableContext>

@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import type { DocumentData } from "@/lib/detail-types";
+import { ConfirmDialog } from "../ConfirmDialog";
 
 const KINDS = [
   { value: "resume", label: "Resume" },
@@ -35,8 +36,10 @@ export function DocumentsTab({
     router.refresh();
   }
 
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
+
   async function remove(id: number) {
-    if (!confirm("Delete this document?")) return;
+    setConfirmingId(null);
     await fetch(`/api/documents/${id}`, { method: "DELETE" });
     router.refresh();
   }
@@ -74,7 +77,11 @@ export function DocumentsTab({
               {d.filename}
             </a>
             <span className="text-xs text-slate-400">{d.createdAt.slice(0, 10)}</span>
-            <button onClick={() => remove(d.id)} className="text-xs text-slate-300 hover:text-red-500">
+            <button
+              onClick={() => setConfirmingId(d.id)}
+              className="text-xs text-slate-300 hover:text-red-500"
+              aria-label={`Delete ${d.filename}`}
+            >
               ✕
             </button>
           </li>
@@ -83,6 +90,13 @@ export function DocumentsTab({
       {documents.length === 0 && (
         <p className="text-sm text-slate-400">No documents yet.</p>
       )}
+      <ConfirmDialog
+        open={confirmingId !== null}
+        title="Delete this document?"
+        body="The file is removed permanently."
+        onConfirm={() => confirmingId !== null && remove(confirmingId)}
+        onCancel={() => setConfirmingId(null)}
+      />
     </div>
   );
 }

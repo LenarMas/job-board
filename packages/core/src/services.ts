@@ -203,7 +203,99 @@ export function createServices(db: Db) {
   }
 
   function findJobByUrl(url: string) {
-    return db.select().from(jobs).where(eq(jobs.url, url)).get();
+    // Archived jobs don't count as duplicates — recapturing a posting whose
+    // old card was archived starts a fresh card.
+    return db
+      .select()
+      .from(jobs)
+      .where(and(eq(jobs.url, url), isNull(jobs.archivedAt)))
+      .get();
+  }
+
+  // ---- archive / merge ----
+
+  /** Reversible soft delete: hides the job everywhere, keeps its children. */
+  function archiveJob(id: number) {
+    return db
+      .update(jobs)
+      .set({ archivedAt: new Date() })
+      .where(eq(jobs.id, id))
+      .returning()
+      .get();
+  }
+
+  function restoreJob(id: number) {
+    return db
+      .update(jobs)
+      .set({ archivedAt: null })
+      .where(eq(jobs.id, id))
+      .returning()
+      .get();
+  }
+
+  function listArchived() {
+    return db
+      .select({
+        id: jobs.id,
+        title: jobs.title,
+        companyName: companies.name,
+        stageId: jobs.stageId,
+        url: jobs.url,
+        archivedAt: jobs.archivedAt,
+      })
+      .from(jobs)
+      .leftJoin(companies, eq(jobs.companyId, companies.id))
+      .where(isNotNull(jobs.archivedAt))
+      .orderBy(desc(jobs.archivedAt))
+      .all();
+  }
+
+  /**
+   * Consolidate a duplicate: move all activities and notes from source to
+   * target, fill target fields that are empty from source (url, salary,
+   * location, description, source, appliedAt), record the merge as a note on
+   * target, keep target's stage, and archive source (reversible). Throws a
+   * descriptive Error on invalid input.
+   */
+  function mergeJobs(sourceId: number, targetId: number) {
+    return db.transaction(() => {
+      if (sourceId === targetId) {
+        throw new Error(`cannot merge job #${sourceId} into itself`);
+      }
+      const source = db.select().from(jobs).where(eq(jobs.id, sourceId)).get();
+      const target = db.select().from(jobs).where(eq(jobs.id, targetId)).get();
+      if (!source) throw new Error(`source job #${sourceId} does not exist`);
+      if (!target) throw new Error(`target job #${targetId} does not exist`);
+      if (source.archivedAt) throw new Error(`source job #${sourceId} is archived — restore it first`);
+      if (target.archivedAt) throw new Error(`target job #${targetId} is archived — restore it first`);
+
+      db.update(activities).set({ jobId: targetId }).where(eq(activities.jobId, sourceId)).run();
+      db.update(notes).set({ jobId: targetId }).where(eq(notes.jobId, sourceId)).run();
+
+      const fill: Partial<typeof jobs.$inferInsert> = {};
+      for (const key of ["url", "salary", "location", "description", "source", "appliedAt"] as const) {
+        if (!target[key] && source[key]) {
+          (fill as Record<string, unknown>)[key] = source[key];
+        }
+      }
+      if (Object.keys(fill).length > 0) {
+        db.update(jobs).set(fill).where(eq(jobs.id, targetId)).run();
+      }
+
+      const company = source.companyId ? getCompany(source.companyId)?.name : null;
+      db.insert(notes)
+        .values({
+          jobId: targetId,
+          body:
+            `Merged job #${sourceId} "${source.title}"${company ? ` (${company})` : ""} ` +
+            `into this card on ${new Date().toISOString().slice(0, 10)}. ` +
+            `Its activities and notes were moved here; the source card was archived.`,
+        })
+        .run();
+
+      db.update(jobs).set({ archivedAt: new Date() }).where(eq(jobs.id, sourceId)).run();
+      return db.select().from(jobs).where(eq(jobs.id, targetId)).get()!;
+    });
   }
 
   type ListJobsFilter = { stageId?: number; stageName?: string; query?: string };
@@ -215,7 +307,7 @@ export function createServices(db: Db) {
       stageId = getStageByName(board.id, filter.stageName)?.id;
       if (!stageId) return [];
     }
-    const conditions = [eq(jobs.boardId, board.id)];
+    const conditions = [eq(jobs.boardId, board.id), isNull(jobs.archivedAt)];
     if (stageId) conditions.push(eq(jobs.stageId, stageId));
     if (filter.query) {
       const pattern = `%${filter.query}%`;
@@ -347,7 +439,7 @@ export function createServices(db: Db) {
   function listActivitiesAcrossJobs(
     filter: { jobId?: number; category?: ActivityCategory } = {},
   ) {
-    const conditions = [];
+    const conditions = [isNull(jobs.archivedAt)];
     if (filter.jobId) conditions.push(eq(activities.jobId, filter.jobId));
     if (filter.category) conditions.push(eq(activities.category, filter.category));
     return db
@@ -548,10 +640,13 @@ export function createServices(db: Db) {
       .leftJoin(companies, eq(jobs.companyId, companies.id))
       .innerJoin(stages, eq(jobs.stageId, stages.id))
       .where(
-        or(
-          like(jobs.title, pattern),
-          like(companies.name, pattern),
-          like(jobs.location, pattern),
+        and(
+          isNull(jobs.archivedAt),
+          or(
+            like(jobs.title, pattern),
+            like(companies.name, pattern),
+            like(jobs.location, pattern),
+          ),
         ),
       )
       .limit(50)
@@ -567,7 +662,7 @@ export function createServices(db: Db) {
     return db
       .select({ stageId: stages.id, stage: stages.name, total: count(jobs.id) })
       .from(stages)
-      .leftJoin(jobs, eq(jobs.stageId, stages.id))
+      .leftJoin(jobs, and(eq(jobs.stageId, stages.id), isNull(jobs.archivedAt)))
       .where(eq(stages.boardId, board.id))
       .groupBy(stages.id)
       .orderBy(asc(stages.position))
@@ -587,7 +682,13 @@ export function createServices(db: Db) {
     const rows = db
       .select({ appliedAt: jobs.appliedAt })
       .from(jobs)
-      .where(and(isNotNull(jobs.appliedAt), gt(jobs.appliedAt, since)))
+      .where(
+        and(
+          isNotNull(jobs.appliedAt),
+          gt(jobs.appliedAt, since),
+          isNull(jobs.archivedAt),
+        ),
+      )
       .all();
     const buckets = new Map<string, number>();
     for (const row of rows) {
@@ -608,6 +709,7 @@ export function createServices(db: Db) {
       })
       .from(stageEvents)
       .innerJoin(stages, eq(stageEvents.toStageId, stages.id))
+      .innerJoin(jobs, and(eq(stageEvents.jobId, jobs.id), isNull(jobs.archivedAt)))
       .groupBy(stages.name)
       .all();
     return new Map(rows.map((r) => [r.stage, r.n]));
@@ -638,6 +740,7 @@ export function createServices(db: Db) {
         movedAt: stageEvents.movedAt,
       })
       .from(stageEvents)
+      .innerJoin(jobs, and(eq(stageEvents.jobId, jobs.id), isNull(jobs.archivedAt)))
       .orderBy(asc(stageEvents.jobId), asc(stageEvents.movedAt))
       .all();
     const stageById = new Map(
@@ -669,7 +772,7 @@ export function createServices(db: Db) {
     const applied = db
       .select({ n: count() })
       .from(jobs)
-      .where(isNotNull(jobs.appliedAt))
+      .where(and(isNotNull(jobs.appliedAt), isNull(jobs.archivedAt)))
       .get()!.n;
     if (applied === 0) return { applied, responded: 0, rate: 0 };
     // A job can be both interviewed and later rejected; count distinct jobs.
@@ -681,6 +784,7 @@ export function createServices(db: Db) {
       .where(
         and(
           isNotNull(jobs.appliedAt),
+          isNull(jobs.archivedAt),
           or(
             isNotNull(jobs.rejectedAt),
             eq(stages.name, "interview"),
@@ -702,6 +806,7 @@ export function createServices(db: Db) {
     const rows = db
       .select({ category: activities.category, title: activities.title })
       .from(activities)
+      .innerJoin(jobs, and(eq(activities.jobId, jobs.id), isNull(jobs.archivedAt)))
       .all();
     const funnel = { screens: 0, hmRounds: 0, technicalRounds: 0, finalRounds: 0, unclassifiedInterviews: 0, offers: 0 };
     for (const row of rows) {
@@ -733,6 +838,7 @@ export function createServices(db: Db) {
     const rows = db
       .select({ source: jobs.source, appliedAt: jobs.appliedAt, companyId: jobs.companyId })
       .from(jobs)
+      .where(isNull(jobs.archivedAt))
       .all();
     const buckets = new Map<string, { jobs: number; companies: Set<number | null> }>();
     for (const row of rows) {
@@ -827,6 +933,10 @@ export function createServices(db: Db) {
     getJob,
     updateJob,
     deleteJob,
+    archiveJob,
+    restoreJob,
+    listArchived,
+    mergeJobs,
     findJobByUrl,
     listJobs,
     moveJob,

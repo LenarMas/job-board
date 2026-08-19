@@ -13,6 +13,7 @@ import type {
   StageEventData,
 } from "@/lib/detail-types";
 import { CompanyLogo } from "../CompanyLogo";
+import { ConfirmDialog } from "../ConfirmDialog";
 import { ActivitiesTab } from "./ActivitiesTab";
 import { CompanyTab } from "./CompanyTab";
 import { ContactsTab } from "./ContactsTab";
@@ -44,6 +45,7 @@ export function JobDetail({
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("Info");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   async function moveToStage(stageId: number) {
     await fetch(`/api/jobs/${job.id}/move`, {
@@ -54,8 +56,13 @@ export function JobDetail({
     router.refresh();
   }
 
+  async function archiveJob() {
+    await fetch(`/api/jobs/${job.id}/archive`, { method: "POST" });
+    router.push("/");
+    router.refresh();
+  }
+
   async function deleteJob() {
-    if (!confirm("Delete this job and everything attached to it?")) return;
     await fetch(`/api/jobs/${job.id}`, { method: "DELETE" });
     router.push("/");
     router.refresh();
@@ -91,11 +98,26 @@ export function JobDetail({
             ))}
           </select>
           <button
-            onClick={deleteJob}
+            onClick={archiveJob}
+            className="rounded-md px-2 py-1 text-sm text-amber-700 hover:bg-amber-50"
+            title="Reversible — restore from the Archived page"
+          >
+            Archive
+          </button>
+          <button
+            onClick={() => setConfirmingDelete(true)}
             className="rounded-md px-2 py-1 text-sm text-red-600 hover:bg-red-50"
           >
             Delete
           </button>
+          <ConfirmDialog
+            open={confirmingDelete}
+            title="Delete this job permanently?"
+            body="This removes the job and everything attached to it — activities, notes, documents. If you just want it off the board, use Archive instead."
+            confirmLabel="Delete permanently"
+            onConfirm={deleteJob}
+            onCancel={() => setConfirmingDelete(false)}
+          />
         </div>
       </div>
 

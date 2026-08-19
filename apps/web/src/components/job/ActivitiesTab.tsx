@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { ActivityData, StageEventData } from "@/lib/detail-types";
+import { ConfirmDialog } from "../ConfirmDialog";
 
 const CATEGORIES = [
   { value: "apply", label: "Apply" },
@@ -56,9 +57,10 @@ export function ActivitiesTab({
     router.refresh();
   }
 
+  const [confirmingEventId, setConfirmingEventId] = useState<number | null>(null);
+
   async function removeStageEvent(id: number) {
-    if (!confirm("Remove this stage change from the history? Metrics recompute without it."))
-      return;
+    setConfirmingEventId(null);
     await fetch(`/api/stage-events/${id}`, { method: "DELETE" });
     router.refresh();
   }
@@ -180,7 +182,7 @@ export function ActivitiesTab({
                   {e.movedAt.slice(0, 10)}
                 </span>
                 <button
-                  onClick={() => removeStageEvent(e.id)}
+                  onClick={() => setConfirmingEventId(e.id)}
                   className="text-xs text-slate-300 hover:text-red-500"
                   aria-label="Remove this stage change"
                   title="Remove accidental move"
@@ -192,6 +194,14 @@ export function ActivitiesTab({
           </ul>
         </>
       )}
+      <ConfirmDialog
+        open={confirmingEventId !== null}
+        title="Remove this stage change?"
+        body="It is removed from the history and every history-derived metric recomputes without it."
+        confirmLabel="Remove"
+        onConfirm={() => confirmingEventId !== null && removeStageEvent(confirmingEventId)}
+        onCancel={() => setConfirmingEventId(null)}
+      />
     </div>
   );
 }

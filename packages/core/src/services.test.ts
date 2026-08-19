@@ -158,6 +158,107 @@ describe("activities, notes, contacts, documents", () => {
   });
 });
 
+describe("archive and merge", () => {
+  it("archive hides the job from board, search, and metrics; restore returns it intact", () => {
+    const keep = svc.createJob({ title: "Keeper", company: "Acme", stageName: "applied", appliedAt: daysAgo(5) });
+    const dupe = svc.createJob({
+      title: "Duplicate Engineer",
+      company: "Beta Corp",
+      stageName: "applied",
+      appliedAt: daysAgo(3),
+      url: "https://example.test/dupe",
+      salary: "$100k",
+    });
+    svc.createActivity({ jobId: dupe.id, category: "screen", title: "Phone screen" });
+    svc.createNote({ jobId: dupe.id, body: "note stays" });
+    void keep;
+
+    svc.archiveJob(dupe.id);
+    expect(svc.listJobs().map((j) => j.id)).not.toContain(dupe.id);
+    expect(svc.boardSnapshot().stages.flatMap((s) => s.jobs.map((j) => j.id))).not.toContain(dupe.id);
+    expect(svc.search("Duplicate").length).toBe(0);
+    const totals = Object.fromEntries(svc.totalsPerStage().map((t) => [t.stage, t.total]));
+    expect(totals.applied).toBe(1); // only the keeper
+    expect(svc.responseRate().applied).toBe(1);
+    expect(svc.interviewFunnel().screens).toBe(0); // archived job's activity excluded
+    expect(svc.sourceBreakdown().reduce((n, r) => n + r.jobs, 0)).toBe(1);
+    expect(svc.applicationsPerWeek().reduce((n, w) => n + w.applications, 0)).toBe(1);
+    expect(svc.findJobByUrl("https://example.test/dupe")).toBeUndefined();
+    expect(svc.listArchived().map((j) => j.id)).toContain(dupe.id);
+
+    svc.restoreJob(dupe.id);
+    const restored = svc.getJob(dupe.id)!;
+    expect(restored.title).toBe("Duplicate Engineer");
+    expect(restored.salary).toBe("$100k");
+    expect(restored.appliedAt).not.toBeNull();
+    expect(svc.listActivities(dupe.id)).toHaveLength(1);
+    expect(svc.listNotes(dupe.id)).toHaveLength(1);
+    expect(svc.listJobs().map((j) => j.id)).toContain(dupe.id);
+    expect(svc.interviewFunnel().screens).toBe(1);
+  });
+
+  it("merge moves all children to target with no orphans and fills empty fields", () => {
+    const target = svc.createJob({ title: "SRE", company: "Acme", stageName: "interview" });
+    const source = svc.createJob({
+      title: "SRE (dup)",
+      company: "Acme",
+      stageName: "applied",
+      url: "https://example.test/sre",
+      salary: "$150k",
+      appliedAt: daysAgo(10),
+    });
+    svc.createActivity({ jobId: source.id, category: "apply", title: "Applied" });
+    svc.createActivity({ jobId: source.id, category: "screen", title: "Recruiter call" });
+    svc.createNote({ jobId: source.id, body: "from the duplicate" });
+
+    const merged = svc.mergeJobs(source.id, target.id);
+    expect(merged.id).toBe(target.id);
+    expect(merged.stageId).toBe(target.stageId); // stage kept
+    expect(merged.url).toBe("https://example.test/sre"); // filled from source
+    expect(merged.salary).toBe("$150k");
+    expect(merged.appliedAt).not.toBeNull();
+    // children moved, none orphaned on the source
+    expect(svc.listActivities(source.id)).toHaveLength(0);
+    expect(svc.listActivities(target.id)).toHaveLength(2);
+    const targetNotes = svc.listNotes(target.id);
+    expect(targetNotes.some((n) => n.body === "from the duplicate")).toBe(true);
+    expect(targetNotes.some((n) => n.body.startsWith("Merged job #"))).toBe(true);
+    expect(svc.listNotes(source.id)).toHaveLength(0);
+    // source archived, not deleted
+    expect(svc.getJob(source.id)).toBeDefined();
+    expect(svc.listArchived().map((j) => j.id)).toContain(source.id);
+  });
+
+  it("merge refuses self-merge and archived participants with clear errors", () => {
+    const a = svc.createJob({ title: "A", stageName: "applied" });
+    const b = svc.createJob({ title: "B", stageName: "applied" });
+    expect(() => svc.mergeJobs(a.id, a.id)).toThrow(/into itself/);
+    svc.archiveJob(b.id);
+    expect(() => svc.mergeJobs(b.id, a.id)).toThrow(/archived/);
+    expect(() => svc.mergeJobs(a.id, b.id)).toThrow(/archived/);
+    expect(() => svc.mergeJobs(a.id, 99999)).toThrow(/does not exist/);
+  });
+
+  it("updateJob patches only the provided fields", () => {
+    const job = svc.createJob({
+      title: "Original",
+      company: "Acme",
+      stageName: "applied",
+      location: "NYC",
+      salary: "$1",
+      url: "https://example.test/orig",
+    });
+    svc.updateJob(job.id, { salary: "$180k", appliedAt: new Date("2026-07-01T00:00:00Z") });
+    const after = svc.getJob(job.id)!;
+    expect(after.salary).toBe("$180k");
+    expect(after.appliedAt).toEqual(new Date("2026-07-01T00:00:00Z"));
+    expect(after.title).toBe("Original");
+    expect(after.location).toBe("NYC");
+    expect(after.url).toBe("https://example.test/orig");
+    expect(after.company?.name).toBe("Acme");
+  });
+});
+
 describe("metrics", () => {
   function seedPipeline() {
     // 4 applied total: 1 still applied, 2 interviewed (1 of those got an
