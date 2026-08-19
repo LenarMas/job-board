@@ -259,6 +259,54 @@ describe("archive and merge", () => {
   });
 });
 
+describe("scheduling", () => {
+  const at = (h: number, m = 0) => new Date(Date.UTC(2026, 7, 21, h, m));
+
+  it("find_conflicts catches a real overlap and tight gaps, ignoring archived jobs", () => {
+    const a = svc.createJob({ title: "A", company: "Acme", stageName: "interview" });
+    const b = svc.createJob({ title: "B", company: "Beta", stageName: "interview" });
+    const c = svc.createJob({ title: "C", company: "Gamma", stageName: "interview" });
+    // 11:00–11:45 overlaps the 10:00–13:30 window
+    svc.createActivity({ jobId: a.id, category: "hm", title: "HM round", startsAt: at(11), endsAt: at(11, 45) });
+    svc.createActivity({ jobId: b.id, category: "screen", title: "Agency block", startsAt: at(10), endsAt: at(13, 30) });
+    // 14:00–14:30 is only 30 minutes after the block ends
+    svc.createActivity({ jobId: c.id, category: "technical", title: "Tech round", startsAt: at(14), endsAt: at(14, 30) });
+
+    const { overlaps, tight } = svc.findConflicts(at(0), at(23), 45);
+    expect(overlaps).toHaveLength(1);
+    expect([overlaps[0]!.a.title, overlaps[0]!.b.title].sort()).toEqual(["Agency block", "HM round"]);
+    expect(tight).toHaveLength(1);
+    expect(tight[0]!.gapMinutes).toBe(30);
+
+    // archiving the agency job removes its block from conflict checks
+    svc.archiveJob(b.id);
+    expect(svc.findConflicts(at(0), at(23), 45).overlaps).toHaveLength(0);
+  });
+
+  it("availability windows can be listed and marked taken", () => {
+    const w = svc.addAvailability(at(10), at(13, 30), "offered to agency");
+    const job = svc.createJob({ title: "A", stageName: "interview" });
+    const act = svc.createActivity({ jobId: job.id, category: "hm", title: "HM", startsAt: at(11), endsAt: at(11, 45) });
+    expect(svc.listAvailability(at(9), at(14))).toHaveLength(1);
+    expect(svc.listAvailability(at(14), at(18))).toHaveLength(0);
+    const taken = svc.markAvailabilityTaken(w.id, act.id);
+    expect(taken.takenByActivityId).toBe(act.id);
+  });
+
+  it("contacts attach to a job with a role, deduped by name+email", () => {
+    const job = svc.createJob({ title: "A", company: "Acme", stageName: "interview" });
+    svc.addContactToJob(job.id, { name: "Pat Doe", email: "pat@agency.example", role: "agency" });
+    svc.addContactToJob(job.id, { name: "Kim Roe", email: "kim@acme.example", title: "Coordinator", role: "coordinator" });
+    // same person again with a new role updates the link, no duplicate contact
+    svc.addContactToJob(job.id, { name: "Pat Doe", email: "pat@agency.example", role: "recruiter" });
+    const linked = svc.listContactsForJob(job.id);
+    expect(linked).toHaveLength(2);
+    expect(linked.find((c) => c.name === "Pat Doe")?.role).toBe("recruiter");
+    expect(linked.find((c) => c.name === "Kim Roe")?.role).toBe("coordinator");
+    expect(svc.listContacts()).toHaveLength(2);
+  });
+});
+
 describe("metrics", () => {
   function seedPipeline() {
     // 4 applied total: 1 still applied, 2 interviewed (1 of those got an

@@ -86,6 +86,21 @@ export function ActivitiesTab({
         />
         <div className="min-w-0 flex-1">
           <span className={a.completedAt ? "text-slate-400 line-through" : ""}>{a.title}</span>
+          {a.startsAt && (
+            <p className="text-xs text-indigo-600">
+              {new Date(a.startsAt).toLocaleString()}
+              {a.endsAt && ` – ${new Date(a.endsAt).toLocaleTimeString()}`}
+              {a.interviewerName && ` · ${a.interviewerName}`}
+              {a.meetingUrl && (
+                <>
+                  {" · "}
+                  <a href={a.meetingUrl} target="_blank" rel="noreferrer" className="underline">
+                    join
+                  </a>
+                </>
+              )}
+            </p>
+          )}
           {a.note && <p className="truncate text-xs text-slate-400">{a.note}</p>}
         </div>
         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">

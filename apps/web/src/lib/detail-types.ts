@@ -35,11 +35,17 @@ export type CompanyData = {
 
 export type ActivityData = {
   id: number;
-  category: "apply" | "interview" | "follow_up" | "offer" | "other";
+  category: string;
   title: string;
   note: string | null;
   dueAt: string | null;
   completedAt: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  timezone: string | null;
+  meetingUrl: string | null;
+  interviewerName: string | null;
+  interviewerTitle: string | null;
   createdAt: string;
 };
 
@@ -57,6 +63,7 @@ export type ContactData = {
   phone: string | null;
   linkedin: string | null;
   notes: string | null;
+  role?: string | null;
 };
 
 export type DocumentData = {

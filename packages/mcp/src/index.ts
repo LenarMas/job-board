@@ -12,6 +12,7 @@ import { z } from "zod";
 import {
   activityCategories,
   classifyInterviewTitle,
+  contactRoles,
   createDb,
   createServices,
   DEFAULT_STAGES,
@@ -89,6 +90,16 @@ server.tool(
       `source: ${job.source ?? "untagged"}`,
       `created: ${fmtDate(job.createdAt)}  applied: ${fmtDate(job.appliedAt)}  rejected: ${fmtDate(job.rejectedAt)}`,
     ];
+    if (job.compMin != null || job.compMax != null) {
+      lines.push(
+        `comp: ${job.compMin ?? "?"}–${job.compMax ?? "?"} ${job.compUnit ?? ""} (${job.compBasis ?? "unknown basis"}, ${job.compSource ?? "unknown source"})`,
+      );
+    }
+    if (job.externalId) lines.push(`requisition id: ${job.externalId}`);
+    if (job.calendarEventUrl || job.calendarEventId) {
+      lines.push(`calendar: ${job.calendarEventUrl ?? job.calendarEventId}`);
+    }
+    if (job.jdSourceUrl) lines.push(`jd captured from: ${job.jdSourceUrl}${job.jdCapturedAt ? ` on ${fmtDate(job.jdCapturedAt)}` : ""}`);
     if (activities.length > 0) {
       lines.push(`activities (${activities.length}):`);
       for (const a of activities.slice(0, 15)) {
@@ -97,7 +108,13 @@ server.tool(
           : a.dueAt
             ? `due ${fmtDate(a.dueAt)}`
             : "pending";
-        lines.push(`  - [${a.category}] ${a.title} (${status})`);
+        let line = `  - #${a.id} [${a.category}] ${a.title} (${status})`;
+        if (a.startsAt) {
+          line += ` scheduled ${a.startsAt.toISOString()}${a.endsAt ? ` – ${a.endsAt.toISOString()}` : ""}${a.timezone ? ` ${a.timezone}` : ""}`;
+        }
+        if (a.interviewerName) line += ` with ${a.interviewerName}${a.interviewerTitle ? ` (${a.interviewerTitle})` : ""}`;
+        if (a.meetingUrl) line += ` ${a.meetingUrl}`;
+        lines.push(line);
       }
     }
     if (notes.length > 0) {
@@ -159,8 +176,17 @@ server.tool(
     description: z.string().optional(),
     source: z.enum(jobSources).optional(),
     applied_at: z.string().optional().describe("ISO date, e.g. 2026-07-01; empty string clears it"),
+    comp_min: z.number().optional().describe("Structured compensation lower bound (number only)"),
+    comp_max: z.number().optional(),
+    comp_unit: z.enum(["annual", "hourly"]).optional(),
+    comp_basis: z.enum(["w2", "c2c", "1099", "unknown"]).optional(),
+    comp_source: z.enum(["posted", "recruiter", "inferred"]).optional(),
+    jd_source_url: z.string().optional().describe("Where the description/JD was captured from"),
+    external_id: z.string().optional().describe("Employer requisition id, e.g. 210747612; unique per company"),
+    calendar_event_id: z.string().optional(),
+    calendar_event_url: z.string().optional(),
   },
-  async ({ id, applied_at, ...rest }) => {
+  async ({ id, applied_at, comp_min, comp_max, comp_unit, comp_basis, comp_source, jd_source_url, external_id, calendar_event_id, calendar_event_url, ...rest }) => {
     const patch: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(rest)) {
       if (value !== undefined) patch[key] = value;
@@ -168,6 +194,16 @@ server.tool(
     if (applied_at !== undefined) {
       patch.appliedAt = applied_at ? new Date(applied_at) : null;
     }
+    if (comp_min !== undefined) patch.compMin = comp_min;
+    if (comp_max !== undefined) patch.compMax = comp_max;
+    if (comp_unit !== undefined) patch.compUnit = comp_unit;
+    if (comp_basis !== undefined) patch.compBasis = comp_basis;
+    if (comp_source !== undefined) patch.compSource = comp_source;
+    if (jd_source_url !== undefined) patch.jdSourceUrl = jd_source_url || null;
+    if (external_id !== undefined) patch.externalId = external_id || null;
+    if (calendar_event_id !== undefined) patch.calendarEventId = calendar_event_id || null;
+    if (calendar_event_url !== undefined) patch.calendarEventUrl = calendar_event_url || null;
+    if (rest.description !== undefined) patch.jdCapturedAt = new Date();
     if (Object.keys(patch).length === 0) return text("Nothing to update.");
     const updated = svc.updateJob(id, patch);
     if (!updated) return text(`No job with id ${id}.`);
@@ -265,8 +301,16 @@ server.tool(
     note: z.string().optional(),
     due_at: z.string().optional().describe("ISO date, e.g. 2026-08-20"),
     completed: z.boolean().default(false),
+    starts_at: z.string().optional().describe("Scheduled start, ISO datetime e.g. 2026-08-21T11:00:00-04:00"),
+    ends_at: z.string().optional().describe("Scheduled end, ISO datetime"),
+    timezone: z.string().optional().describe("IANA name; defaults to America/New_York when times are set"),
+    meeting_url: z.string().optional(),
+    meeting_id: z.string().optional(),
+    meeting_passcode: z.string().optional(),
+    interviewer_name: z.string().optional(),
+    interviewer_title: z.string().optional(),
   },
-  async ({ job_id, category, title, note, due_at, completed }) => {
+  async ({ job_id, category, title, note, due_at, completed, starts_at, ends_at, timezone, meeting_url, meeting_id, meeting_passcode, interviewer_name, interviewer_title }) => {
     if (!svc.getJob(job_id)) return text(`No job with id ${job_id}.`);
     const activity = svc.createActivity({
       jobId: job_id,
@@ -275,8 +319,27 @@ server.tool(
       note,
       dueAt: due_at ? new Date(due_at) : undefined,
       completedAt: completed ? new Date() : undefined,
+      startsAt: starts_at ? new Date(starts_at) : undefined,
+      endsAt: ends_at ? new Date(ends_at) : undefined,
+      timezone: timezone ?? (starts_at ? "America/New_York" : undefined),
+      meetingUrl: meeting_url,
+      meetingId: meeting_id,
+      meetingPasscode: meeting_passcode,
+      interviewerName: interviewer_name,
+      interviewerTitle: interviewer_title,
     });
-    return text(`Logged ${category} activity #${activity.id} on job #${job_id}.`);
+    let conflictNote = "";
+    if (starts_at && ends_at) {
+      const { overlaps } = svc.findConflicts(new Date(starts_at), new Date(ends_at));
+      const hits = overlaps.filter((o) => o.a.id === activity.id || o.b.id === activity.id);
+      if (hits.length > 0) {
+        const other = hits.map((o) => (o.a.id === activity.id ? o.b : o.a));
+        conflictNote =
+          `\n⚠ CONFLICT: overlaps ` +
+          other.map((x) => `activity #${x.id} (${x.title} — ${x.companyName ?? x.jobTitle})`).join(", ");
+      }
+    }
+    return text(`Logged ${category} activity #${activity.id} on job #${job_id}.${conflictNote}`);
   },
 );
 
@@ -328,14 +391,30 @@ server.tool(
     note: z.string().optional(),
     due_at: z.string().optional().describe("ISO date, e.g. 2026-08-20"),
     completed: z.boolean().optional(),
+    starts_at: z.string().optional().describe("Scheduled start, ISO datetime; empty string clears"),
+    ends_at: z.string().optional().describe("Scheduled end, ISO datetime; empty string clears"),
+    timezone: z.string().optional(),
+    meeting_url: z.string().optional(),
+    meeting_id: z.string().optional(),
+    meeting_passcode: z.string().optional(),
+    interviewer_name: z.string().optional(),
+    interviewer_title: z.string().optional(),
   },
-  async ({ activity_id, category, title, note, due_at, completed }) => {
+  async ({ activity_id, category, title, note, due_at, completed, starts_at, ends_at, timezone, meeting_url, meeting_id, meeting_passcode, interviewer_name, interviewer_title }) => {
     const patch: Record<string, unknown> = {};
     if (category !== undefined) patch.category = category;
     if (title !== undefined) patch.title = title;
     if (note !== undefined) patch.note = note;
     if (due_at !== undefined) patch.dueAt = due_at ? new Date(due_at) : null;
     if (completed !== undefined) patch.completedAt = completed ? new Date() : null;
+    if (starts_at !== undefined) patch.startsAt = starts_at ? new Date(starts_at) : null;
+    if (ends_at !== undefined) patch.endsAt = ends_at ? new Date(ends_at) : null;
+    if (timezone !== undefined) patch.timezone = timezone || null;
+    if (meeting_url !== undefined) patch.meetingUrl = meeting_url || null;
+    if (meeting_id !== undefined) patch.meetingId = meeting_id || null;
+    if (meeting_passcode !== undefined) patch.meetingPasscode = meeting_passcode || null;
+    if (interviewer_name !== undefined) patch.interviewerName = interviewer_name || null;
+    if (interviewer_title !== undefined) patch.interviewerTitle = interviewer_title || null;
     if (Object.keys(patch).length === 0) return text("Nothing to update.");
     const updated = svc.updateActivity(activity_id, patch);
     if (!updated) return text(`No activity with id ${activity_id}.`);
@@ -343,6 +422,104 @@ server.tool(
       `Updated activity #${updated.id}: [${updated.category}] ${updated.title}` +
         (updated.completedAt ? ` (done ${fmtDate(updated.completedAt)})` : ""),
     );
+  },
+);
+
+server.tool(
+  "find_conflicts",
+  "Scheduling check, read-only: within a time range, list activity pairs whose scheduled times overlap, and pairs closer together than gap_minutes. Only activities with starts_at/ends_at on live (non-archived) jobs are considered.",
+  {
+    from: z.string().describe("ISO datetime"),
+    to: z.string().describe("ISO datetime"),
+    gap_minutes: z.number().int().min(0).default(0).describe("Also flag pairs with less than this many minutes between them"),
+  },
+  async ({ from, to, gap_minutes }) => {
+    const { overlaps, tight } = svc.findConflicts(new Date(from), new Date(to), gap_minutes);
+    if (overlaps.length === 0 && tight.length === 0) return text("No conflicts in that range.");
+    const fmt = (x: { id: number; title: string; startsAt: Date | null; endsAt: Date | null; companyName: string | null; jobTitle: string }) =>
+      `#${x.id} ${x.title} (${x.companyName ?? x.jobTitle}) ${x.startsAt?.toISOString()}–${x.endsAt?.toISOString()}`;
+    const lines = [
+      ...overlaps.map((o) => `OVERLAP: ${fmt(o.a)}  ⟷  ${fmt(o.b)}`),
+      ...tight.map((t) => `TIGHT (${Math.round(t.gapMinutes)}m gap): ${fmt(t.a)}  →  ${fmt(t.b)}`),
+    ];
+    return text(lines.join("\n"));
+  },
+);
+
+server.tool(
+  "add_availability",
+  "Record a time window offered to a recruiter, so the same slot is never offered twice. Reversible context, not a booking.",
+  {
+    start: z.string().describe("ISO datetime"),
+    end: z.string().describe("ISO datetime"),
+    note: z.string().optional().describe("e.g. who it was offered to"),
+  },
+  async ({ start, end, note }) => {
+    const w = svc.addAvailability(new Date(start), new Date(end), note);
+    return text(`Recorded availability #${w.id}: ${w.startAt.toISOString()} – ${w.endAt.toISOString()}${note ? ` (${note})` : ""}.`);
+  },
+);
+
+server.tool(
+  "list_availability",
+  "List offered availability windows in a range, with whether each is still free or already taken by a booked activity. Read-only.",
+  { from: z.string(), to: z.string() },
+  async ({ from, to }) => {
+    const rows = svc.listAvailability(new Date(from), new Date(to));
+    if (rows.length === 0) return text("No availability windows in that range.");
+    const lines = rows.map(
+      (w) =>
+        `#${w.id} ${w.startAt.toISOString()} – ${w.endAt.toISOString()} ` +
+        (w.takenByActivityId ? `TAKEN by activity #${w.takenByActivityId}` : "free") +
+        (w.note ? ` (${w.note})` : ""),
+    );
+    return text(lines.join("\n"));
+  },
+);
+
+server.tool(
+  "mark_availability_taken",
+  "Mark an offered availability window as consumed by a booked activity, so it is no longer offered elsewhere.",
+  { id: z.number().int(), activity_id: z.number().int() },
+  async ({ id, activity_id }) => {
+    const w = svc.markAvailabilityTaken(id, activity_id);
+    if (!w) return text(`No availability window with id ${id}.`);
+    return text(`Window #${id} marked taken by activity #${activity_id}.`);
+  },
+);
+
+server.tool(
+  "add_contact",
+  "Attach a person to a job with a role (recruiter, coordinator, interviewer, hiring_manager, agency, referrer). Reuses an existing contact matching the same name and email; re-adding the same person updates their role on that job.",
+  {
+    job_id: z.number().int(),
+    name: z.string(),
+    email: z.string().optional(),
+    phone: z.string().optional(),
+    title: z.string().optional(),
+    company: z.string().optional(),
+    role: z.enum(contactRoles).optional(),
+  },
+  async ({ job_id, name, email, phone, title, company, role }) => {
+    if (!svc.getJob(job_id)) return text(`No job with id ${job_id}.`);
+    const c = svc.addContactToJob(job_id, { name, email, phone, title, company, role });
+    return text(`Linked ${c.name}${role ? ` as ${role}` : ""} to job #${job_id} (contact #${c.id}).`);
+  },
+);
+
+server.tool(
+  "list_contacts",
+  "List the people attached to a job with their roles and contact details. Read-only.",
+  { job_id: z.number().int() },
+  async ({ job_id }) => {
+    const rows = svc.listContactsForJob(job_id);
+    if (rows.length === 0) return text(`No contacts on job #${job_id}.`);
+    const lines = rows.map(
+      (c) =>
+        `#${c.id} ${c.name}${c.role ? ` [${c.role}]` : ""}${c.title ? ` — ${c.title}` : ""}` +
+        [c.email, c.phone].filter(Boolean).map((x) => ` · ${x}`).join(""),
+    );
+    return text(lines.join("\n"));
   },
 );
 

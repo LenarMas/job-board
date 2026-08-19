@@ -5,6 +5,7 @@ import {
   real,
   sqliteTable,
   text,
+  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
 const id = () => integer("id").primaryKey({ autoIncrement: true });
@@ -74,6 +75,21 @@ export const jobs = sqliteTable(
     // Soft delete: archived jobs keep their children but drop out of the
     // board, search, and metrics unless explicitly requested.
     archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
+    // Structured compensation, comparable across cards ("$55-62/hr W2" vs
+    // "$145k-165k" both become numbers + unit + basis).
+    compMin: real("comp_min"),
+    compMax: real("comp_max"),
+    compUnit: text("comp_unit", { enum: ["annual", "hourly"] }),
+    compBasis: text("comp_basis", { enum: ["w2", "c2c", "1099", "unknown"] }),
+    compSource: text("comp_source", { enum: ["posted", "recruiter", "inferred"] }),
+    // description is the JD text; these record where and when it was captured.
+    jdSourceUrl: text("jd_source_url"),
+    jdCapturedAt: integer("jd_captured_at", { mode: "timestamp_ms" }),
+    // Employer requisition id — often the only reliable way to tell two
+    // similarly titled postings apart. Unique per company (NULLs exempt).
+    externalId: text("external_id"),
+    calendarEventId: text("calendar_event_id"),
+    calendarEventUrl: text("calendar_event_url"),
     // How the opportunity originated (cold application vs recruiter reachout
     // vs referral); null means untagged.
     source: text("source", { enum: jobSources }),
@@ -83,6 +99,7 @@ export const jobs = sqliteTable(
   (t) => [
     index("jobs_stage_idx").on(t.stageId, t.position),
     index("jobs_company_idx").on(t.companyId),
+    uniqueIndex("jobs_company_external_idx").on(t.companyId, t.externalId),
   ],
 );
 
@@ -113,6 +130,16 @@ export const activities = sqliteTable(
     note: text("note"),
     dueAt: integer("due_at", { mode: "timestamp_ms" }),
     completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+    // Real scheduling data for interviews, so times can be queried and
+    // checked for conflicts instead of living in note prose.
+    startsAt: integer("starts_at", { mode: "timestamp_ms" }),
+    endsAt: integer("ends_at", { mode: "timestamp_ms" }),
+    timezone: text("timezone"), // IANA name; app default America/New_York
+    meetingUrl: text("meeting_url"),
+    meetingId: text("meeting_id"),
+    meetingPasscode: text("meeting_passcode"),
+    interviewerName: text("interviewer_name"),
+    interviewerTitle: text("interviewer_title"),
     createdAt: createdAt(),
     sourceId: text("source_id").unique(),
     extras: text("extras", { mode: "json" }),
@@ -147,6 +174,16 @@ export const contacts = sqliteTable("contacts", {
   extras: text("extras", { mode: "json" }),
 });
 
+export const contactRoles = [
+  "recruiter",
+  "coordinator",
+  "interviewer",
+  "hiring_manager",
+  "agency",
+  "referrer",
+] as const;
+export type ContactRole = (typeof contactRoles)[number];
+
 export const jobContacts = sqliteTable(
   "job_contacts",
   {
@@ -156,9 +193,31 @@ export const jobContacts = sqliteTable(
     contactId: integer("contact_id")
       .notNull()
       .references(() => contacts.id, { onDelete: "cascade" }),
+    // What this person is to THIS job (the same recruiter can be the agency
+    // contact on one card and the referrer on another).
+    role: text("role", { enum: contactRoles }),
   },
   (t) => [primaryKey({ columns: [t.jobId, t.contactId] })],
 );
+
+/**
+ * Interview slots offered to recruiters, so the same window is never offered
+ * twice and a booking can be checked against what is genuinely free.
+ */
+export const availability = sqliteTable("availability", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  startAt: integer("start_at", { mode: "timestamp_ms" }).notNull(),
+  endAt: integer("end_at", { mode: "timestamp_ms" }).notNull(),
+  note: text("note"),
+  takenByActivityId: integer("taken_by_activity_id").references(() => activities.id, {
+    onDelete: "set null",
+  }),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export type Availability = typeof availability.$inferSelect;
 
 export const documentKinds = ["resume", "cover_letter", "other"] as const;
 export type DocumentKind = (typeof documentKinds)[number];

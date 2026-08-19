@@ -53,7 +53,14 @@ export function ContactsTab({
         {contacts.map((c) => (
           <li key={c.id} className="flex items-center gap-3 rounded-md border border-slate-200 px-3 py-2">
             <div className="min-w-0 flex-1">
-              <div className="font-medium">{c.name}</div>
+              <div className="flex items-center gap-2 font-medium">
+                {c.name}
+                {c.role && (
+                  <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-normal text-indigo-600">
+                    {c.role.replace("_", " ")}
+                  </span>
+                )}
+              </div>
               <div className="truncate text-sm text-slate-500">
                 {[c.title, c.email, c.phone].filter(Boolean).join(" · ")}
               </div>

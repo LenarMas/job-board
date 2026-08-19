@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, gt, isNotNull, isNull, like, or, sql } from 
 import type { Db } from "./db";
 import {
   activities,
+  availability,
   boards,
   companies,
   contacts,
@@ -13,6 +14,7 @@ import {
   stageEvents,
   stages,
   type ActivityCategory,
+  type ContactRole,
   type DocumentKind,
 } from "./schema";
 
@@ -470,6 +472,14 @@ export function createServices(db: Db) {
     note?: string;
     dueAt?: Date;
     completedAt?: Date;
+    startsAt?: Date;
+    endsAt?: Date;
+    timezone?: string;
+    meetingUrl?: string;
+    meetingId?: string;
+    meetingPasscode?: string;
+    interviewerName?: string;
+    interviewerTitle?: string;
     createdAt?: Date;
     sourceId?: string;
     extras?: unknown;
@@ -491,6 +501,71 @@ export function createServices(db: Db) {
 
   function deleteActivity(id: number) {
     db.delete(activities).where(eq(activities.id, id)).run();
+  }
+
+  /**
+   * Scheduling sanity check over activities that carry real times (on live
+   * jobs only). Returns pairs that overlap outright and pairs closer
+   * together than gapMinutes.
+   */
+  function findConflicts(from: Date, to: Date, gapMinutes = 0) {
+    const rows = db
+      .select({
+        id: activities.id,
+        title: activities.title,
+        startsAt: activities.startsAt,
+        endsAt: activities.endsAt,
+        jobId: activities.jobId,
+        jobTitle: jobs.title,
+        companyName: companies.name,
+      })
+      .from(activities)
+      .innerJoin(jobs, and(eq(activities.jobId, jobs.id), isNull(jobs.archivedAt)))
+      .leftJoin(companies, eq(jobs.companyId, companies.id))
+      .where(and(isNotNull(activities.startsAt), isNotNull(activities.endsAt)))
+      .all()
+      .filter((a) => a.endsAt! > from && a.startsAt! < to)
+      .sort((a, b) => a.startsAt!.getTime() - b.startsAt!.getTime());
+
+    const overlaps: { a: (typeof rows)[number]; b: (typeof rows)[number] }[] = [];
+    const tight: { a: (typeof rows)[number]; b: (typeof rows)[number]; gapMinutes: number }[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      for (let j = i + 1; j < rows.length; j++) {
+        const a = rows[i]!;
+        const b = rows[j]!;
+        if (b.startsAt! < a.endsAt!) {
+          overlaps.push({ a, b });
+        } else {
+          const gap = (b.startsAt!.getTime() - a.endsAt!.getTime()) / 60_000;
+          if (gapMinutes > 0 && gap < gapMinutes) tight.push({ a, b, gapMinutes: gap });
+        }
+      }
+    }
+    return { overlaps, tight };
+  }
+
+  // ---- availability windows ----
+
+  function addAvailability(startAt: Date, endAt: Date, note?: string) {
+    return db.insert(availability).values({ startAt, endAt, note }).returning().get();
+  }
+
+  function listAvailability(from: Date, to: Date) {
+    return db
+      .select()
+      .from(availability)
+      .all()
+      .filter((w) => w.endAt > from && w.startAt < to)
+      .sort((a, b) => a.startAt.getTime() - b.startAt.getTime());
+  }
+
+  function markAvailabilityTaken(id: number, activityId: number) {
+    return db
+      .update(availability)
+      .set({ takenByActivityId: activityId })
+      .where(eq(availability.id, id))
+      .returning()
+      .get();
   }
 
   // ---- notes ----
@@ -538,11 +613,59 @@ export function createServices(db: Db) {
         phone: contacts.phone,
         linkedin: contacts.linkedin,
         notes: contacts.notes,
+        role: jobContacts.role,
       })
       .from(contacts)
       .innerJoin(jobContacts, eq(jobContacts.contactId, contacts.id))
       .where(eq(jobContacts.jobId, jobId))
       .all();
+  }
+
+  /**
+   * Create a contact and link it to a job with a role in one step (or attach
+   * a role to an existing link). Matches an existing contact by exact name +
+   * email to avoid duplicating people who appear on several jobs.
+   */
+  function addContactToJob(
+    jobId: number,
+    input: {
+      name: string;
+      email?: string;
+      phone?: string;
+      title?: string;
+      company?: string;
+      role?: ContactRole;
+    },
+  ) {
+    return db.transaction(() => {
+      const existing = db
+        .select()
+        .from(contacts)
+        .where(eq(contacts.name, input.name))
+        .all()
+        .find((c) => (input.email ? c.email === input.email : true));
+      const contact =
+        existing ??
+        db
+          .insert(contacts)
+          .values({
+            name: input.name,
+            email: input.email,
+            phone: input.phone,
+            title: input.title,
+            companyId: input.company ? findOrCreateCompany(input.company).id : undefined,
+          })
+          .returning()
+          .get();
+      db.insert(jobContacts)
+        .values({ jobId, contactId: contact.id, role: input.role })
+        .onConflictDoUpdate({
+          target: [jobContacts.jobId, jobContacts.contactId],
+          set: { role: input.role },
+        })
+        .run();
+      return { ...contact, role: input.role ?? null };
+    });
   }
 
   function createContact(input: typeof contacts.$inferInsert) {
@@ -946,6 +1069,11 @@ export function createServices(db: Db) {
     createActivity,
     updateActivity,
     deleteActivity,
+    findConflicts,
+    addAvailability,
+    listAvailability,
+    markAvailabilityTaken,
+    addContactToJob,
     listNotes,
     createNote,
     updateNote,
