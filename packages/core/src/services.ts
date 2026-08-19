@@ -724,9 +724,11 @@ export function createServices(db: Db) {
   }
 
   /**
-   * Scheduling sanity check over activities that carry real times (on live
-   * jobs only). Returns pairs that overlap outright and pairs closer
-   * together than gapMinutes.
+   * Scheduling sanity check over activities on live jobs. Only activities
+   * with real start AND end times can be conflict-checked; the rest of the
+   * range is a blind spot, so it is reported rather than silently skipped:
+   * `considered` counts what was actually examined and `skippedUntimed`
+   * lists in-range activities (by due date) that carry no usable times.
    */
   function findConflicts(from: Date, to: Date, gapMinutes = 0) {
     const rows = db
@@ -735,6 +737,8 @@ export function createServices(db: Db) {
         title: activities.title,
         startsAt: activities.startsAt,
         endsAt: activities.endsAt,
+        dueAt: activities.dueAt,
+        completedAt: activities.completedAt,
         jobId: activities.jobId,
         jobTitle: jobs.title,
         companyName: companies.name,
@@ -742,17 +746,24 @@ export function createServices(db: Db) {
       .from(activities)
       .innerJoin(jobs, and(eq(activities.jobId, jobs.id), isNull(jobs.archivedAt)))
       .leftJoin(companies, eq(jobs.companyId, companies.id))
-      .where(and(isNotNull(activities.startsAt), isNotNull(activities.endsAt)))
-      .all()
-      .filter((a) => a.endsAt! > from && a.startsAt! < to)
-      .sort((a, b) => a.startsAt!.getTime() - b.startsAt!.getTime());
+      .all();
 
-    const overlaps: { a: (typeof rows)[number]; b: (typeof rows)[number] }[] = [];
-    const tight: { a: (typeof rows)[number]; b: (typeof rows)[number]; gapMinutes: number }[] = [];
-    for (let i = 0; i < rows.length; i++) {
-      for (let j = i + 1; j < rows.length; j++) {
-        const a = rows[i]!;
-        const b = rows[j]!;
+    const timed = rows
+      .filter((a) => a.startsAt && a.endsAt && a.endsAt > from && a.startsAt < to)
+      .sort((a, b) => a.startsAt!.getTime() - b.startsAt!.getTime());
+    const skippedUntimed = rows.filter(
+      (a) =>
+        !(a.startsAt && a.endsAt) &&
+        ((a.dueAt && a.dueAt >= from && a.dueAt <= to) ||
+          (a.startsAt && !a.endsAt && a.startsAt >= from && a.startsAt <= to)),
+    );
+
+    const overlaps: { a: (typeof timed)[number]; b: (typeof timed)[number] }[] = [];
+    const tight: { a: (typeof timed)[number]; b: (typeof timed)[number]; gapMinutes: number }[] = [];
+    for (let i = 0; i < timed.length; i++) {
+      for (let j = i + 1; j < timed.length; j++) {
+        const a = timed[i]!;
+        const b = timed[j]!;
         if (b.startsAt! < a.endsAt!) {
           overlaps.push({ a, b });
         } else {
@@ -761,7 +772,33 @@ export function createServices(db: Db) {
         }
       }
     }
-    return { overlaps, tight };
+    return { overlaps, tight, considered: timed.length, skippedUntimed };
+  }
+
+  /**
+   * Activities in a range that carry a due date but no start time — the
+   * conflict check's blind spot, listed so the gaps can be filled
+   * deliberately instead of guessed from due dates.
+   */
+  function listUntimed(from: Date, to: Date) {
+    return db
+      .select({
+        id: activities.id,
+        title: activities.title,
+        category: activities.category,
+        dueAt: activities.dueAt,
+        completedAt: activities.completedAt,
+        jobId: activities.jobId,
+        jobTitle: jobs.title,
+        companyName: companies.name,
+      })
+      .from(activities)
+      .innerJoin(jobs, and(eq(activities.jobId, jobs.id), isNull(jobs.archivedAt)))
+      .leftJoin(companies, eq(jobs.companyId, companies.id))
+      .where(and(isNotNull(activities.dueAt), isNull(activities.startsAt)))
+      .all()
+      .filter((a) => a.dueAt! >= from && a.dueAt! <= to)
+      .sort((a, b) => a.dueAt!.getTime() - b.dueAt!.getTime());
   }
 
   // ---- availability windows ----
@@ -1296,6 +1333,7 @@ export function createServices(db: Db) {
     updateActivity,
     deleteActivity,
     findConflicts,
+    listUntimed,
     addAvailability,
     listAvailability,
     markAvailabilityTaken,

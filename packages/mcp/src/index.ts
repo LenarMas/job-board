@@ -56,7 +56,7 @@ function fmtJobLine(j: {
 
 server.tool(
   "list_jobs",
-  "List jobs on the board, optionally filtered by stage and/or a text query on title/company.",
+  "Read-only. List live (non-archived) jobs on the board, optionally filtered by stage and/or a text query matched against title and company.",
   { stage: stageEnum.optional(), query: z.string().optional() },
   async ({ stage, query }) => {
     const jobs = svc.listJobs({ stageName: stage, query });
@@ -72,7 +72,7 @@ server.tool(
 
 server.tool(
   "get_job",
-  "Get full details for one job: fields, stage, company, activities, notes.",
+  "Read-only. Get one job by id with everything on it: fields, stage, company, source, structured compensation, requisition id, calendar link, JD provenance, resume/cover-letter files sent, activities (with schedule, meeting, and interviewer details), notes, and contacts.",
   { id: z.number().int() },
   async ({ id }) => {
     const job = svc.getJob(id);
@@ -139,7 +139,7 @@ server.tool(
 
 server.tool(
   "add_job",
-  "Add a job to the board.",
+  "Write, idempotent — safe to call without checking for duplicates first: if a live job already matches by url, by external_id (requisition id at the same company), or by company + title (company names fuzzy-matched, so 'JPMorgan Chase & Co.' equals 'JPMorganChase'), NO duplicate is created — the response says it matched, and any empty fields on the match are filled from your input (stage, location, salary, description, source included). Otherwise creates the job and says so. Reversible via archive_job.",
   {
     title: z.string(),
     company: z.string().optional(),
@@ -180,7 +180,7 @@ server.tool(
 
 server.tool(
   "upsert_job",
-  "Create-or-update a job with its activities and notes in ONE atomic call (ideal for backfilling history). Matches an existing live job by url, requisition id, or company+title: on a match it fills only empty fields and appends the children; otherwise it creates. Reports created vs matched.",
+  "Write, idempotent. Create-or-update a job together with its activities and notes in ONE atomic call (ideal for backfilling history: title, company, stage, url, location, salary, description, source, external_id, applied_at, plus activities and notes arrays). Matches an existing live job by url, requisition id, or company+title: on a match it fills only empty fields and appends the children; otherwise it creates. Reports created vs matched. Reversible via archive_job; appended children are individually deletable.",
   {
     title: z.string(),
     company: z.string().optional(),
@@ -248,7 +248,7 @@ server.tool(
 
 server.tool(
   "list_stale",
-  "Read-only follow-up list: live jobs (excluding wishlist and rejected) with no activity in N days, and incomplete activities past their due date.",
+  "Read-only follow-up list: live jobs (excluding wishlist and rejected) with no activity in the last `days` days, and incomplete activities past their due date.",
   { days: z.number().int().min(1).default(7) },
   async ({ days }) => {
     const { staleJobs, overdue } = svc.listStale(days);
@@ -274,7 +274,7 @@ server.tool(
 
 server.tool(
   "update_job",
-  "Update a job's fields in place. Patch semantics: only the fields you provide change; everything else is untouched. Reversible by updating again. Company is matched or created by name.",
+  "Write, reversible (update again to change back). Patch a job by id — only the fields you provide change: title, company (matched or created by name), location, salary, url, description (the JD text; updating it stamps jd_captured_at), source, applied_at, structured comp (comp_min, comp_max, comp_unit, comp_basis, comp_source), jd_source_url, external_id (requisition id), calendar_event_id, calendar_event_url, provenance (source_channel, source_message_id), and which files were sent (resume_path, cover_letter_path).",
   {
     id: z.number().int(),
     title: z.string().optional(),
@@ -330,7 +330,7 @@ server.tool(
 
 server.tool(
   "archive_job",
-  "Archive a job (reversible soft delete): it disappears from the board, search, and metrics but keeps all its activities and notes. Undo with restore_job. Use this to remove duplicates — there is no hard delete over MCP.",
+  "Write, reversible soft delete. Archive the job with this id: it disappears from the board, search, duplicate matching, and every metric, but keeps all its activities and notes. Undo with restore_job. Use this to remove duplicates — there is no hard delete over MCP.",
   { id: z.number().int() },
   async ({ id }) => {
     const job = svc.getJob(id);
@@ -342,7 +342,7 @@ server.tool(
 
 server.tool(
   "restore_job",
-  "Restore an archived job to the board, fully intact. Reversible (archive again).",
+  "Write, reversible (archive again). Restore the archived job with this id to the board, fully intact — fields, activities, and notes exactly as they were.",
   { id: z.number().int() },
   async ({ id }) => {
     const restored = svc.restoreJob(id);
@@ -353,7 +353,7 @@ server.tool(
 
 server.tool(
   "list_archived",
-  "List archived jobs (the ones hidden from the board and metrics). Read-only.",
+  "Read-only. List archived jobs — the ones hidden from the board, search, and metrics — with when each was archived.",
   {},
   async () => {
     const rows = svc.listArchived();
@@ -368,7 +368,7 @@ server.tool(
 
 server.tool(
   "merge_jobs",
-  "Consolidate a duplicate: moves ALL activities and notes from the source job to the target, keeps the target's stage, fills any empty target field (url, salary, location, description, source, applied date) from the source, records the merge as a note, and archives the source. Mostly reversible: the source can be restored, but moved activities and notes stay on the target. Refuses self-merges and archived participants.",
+  "Write, mostly reversible. Consolidate a duplicate: moves ALL activities and notes from the job at source_id to the job at target_id, keeps the target's stage, fills any empty target field (url, salary, location, description, source, applied date) from the source, records the merge as a note, and archives the source. The source can be restored, but moved activities and notes stay on the target. Refuses self-merges and archived participants with a clear error.",
   { source_id: z.number().int(), target_id: z.number().int() },
   async ({ source_id, target_id }) => {
     try {
@@ -385,7 +385,7 @@ server.tool(
 
 server.tool(
   "set_source",
-  "Record how a job originated: applied (cold application), reachout (a recruiter contacted you, e.g. on LinkedIn), referral, or other. Drives the source breakdown in metrics.",
+  "Write, reversible (set again to change). Record how the job at job_id originated — source is one of: applied (cold application), reachout (a recruiter contacted you, e.g. on LinkedIn), referral, other. Drives the source breakdown in metrics.",
   { job_id: z.number().int(), source: z.enum(jobSources) },
   async ({ job_id, source }) => {
     if (!svc.getJob(job_id)) return text(`No job with id ${job_id}.`);
@@ -396,7 +396,7 @@ server.tool(
 
 server.tool(
   "move_job",
-  "Move a job to another stage (sets applied/rejected timestamps on first entry).",
+  "Write, reversible (move back). Move the job with this id to another stage; first entry into applied or rejected stamps the corresponding date, and every move is recorded in the job's stage history.",
   { id: z.number().int(), stage: stageEnum },
   async ({ id, stage }) => {
     try {
@@ -410,7 +410,7 @@ server.tool(
 
 server.tool(
   "log_activity",
-  "Log an activity on a job. Categories: apply, screen (recruiter/screening call), interview (generic), hm (hiring manager round), technical (coding/system design), final (final/onsite round), follow_up, offer, other. Prefer the specific round categories — they feed the interview-rounds metrics.",
+  "Write, reversible via update_activity/delete_activity. Log an activity on the job at job_id with a title, optional note, due_at, and completed flag. category is one of: apply, screen (recruiter/screening call), interview (generic), hm (hiring manager round), technical (coding/system design), final (final/onsite round), follow_up, offer, other — prefer specific round categories, they feed the interview-rounds metrics. Scheduled interviews should carry real times (starts_at, ends_at, timezone) plus meeting_url, meeting_id, meeting_passcode, interviewer_name, interviewer_title; when starts_at and ends_at are given, the response WARNS INLINE if the new booking overlaps an existing scheduled activity, so no separate find_conflicts call is needed for the just-booked slot.",
   {
     job_id: z.number().int(),
     category: z.enum(activityCategories),
@@ -462,7 +462,7 @@ server.tool(
 
 server.tool(
   "list_activities",
-  "List activities across the board (or one job). category filters exactly; category 'unclassified' returns generic interview activities that no round type can be derived for — the ones the metrics funnel reports as unclassified. Use update_activity to retag them.",
+  "Read-only. List activities across the board, or one job's with job_id. category filters exactly; category 'unclassified' returns generic interview activities that no round type can be derived for — the ones the metrics funnel reports as unclassified. Use update_activity to retag them.",
   {
     category: z.enum([...activityCategories, "unclassified"]).optional(),
     job_id: z.number().int().optional(),
@@ -500,7 +500,7 @@ server.tool(
 
 server.tool(
   "update_activity",
-  "Update an existing activity in place: retag its category (apply, screen, interview, hm, technical, final, follow_up, offer, other), rename it, edit the note, change the due date, or mark it complete/incomplete.",
+  "Write, reversible (update again). Patch the activity at activity_id — only provided fields change: category (apply, screen, interview, hm, technical, final, follow_up, offer, other), title, note, due_at, completed (true/false), and the full schedule — starts_at, ends_at, timezone, meeting_url, meeting_id, meeting_passcode, interviewer_name, interviewer_title. This is how a due-date-only activity gets real times so find_conflicts can see it; empty string clears a time or text field.",
   {
     activity_id: z.number().int(),
     category: z.enum(activityCategories).optional(),
@@ -544,28 +544,58 @@ server.tool(
 
 server.tool(
   "find_conflicts",
-  "Scheduling check, read-only: within a time range, list activity pairs whose scheduled times overlap, and pairs closer together than gap_minutes. Only activities with starts_at/ends_at on live (non-archived) jobs are considered.",
+  "Read-only scheduling check between `from` and `to`: lists activity pairs whose scheduled times overlap and pairs closer together than gap_minutes. IMPORTANT: only activities carrying real start AND end times can be checked — the response therefore reports coverage: how many in-range activities were considered and which were skipped as untimed (due date but no time). 'No conflicts' with skipped entries means the range was only partially examined; fill gaps via list_untimed + update_activity.",
   {
     from: z.string().describe("ISO datetime"),
     to: z.string().describe("ISO datetime"),
     gap_minutes: z.number().int().min(0).default(0).describe("Also flag pairs with less than this many minutes between them"),
   },
   async ({ from, to, gap_minutes }) => {
-    const { overlaps, tight } = svc.findConflicts(new Date(from), new Date(to), gap_minutes);
-    if (overlaps.length === 0 && tight.length === 0) return text("No conflicts in that range.");
+    const { overlaps, tight, considered, skippedUntimed } = svc.findConflicts(
+      new Date(from),
+      new Date(to),
+      gap_minutes,
+    );
     const fmt = (x: { id: number; title: string; startsAt: Date | null; endsAt: Date | null; companyName: string | null; jobTitle: string }) =>
       `#${x.id} ${x.title} (${x.companyName ?? x.jobTitle}) ${x.startsAt?.toISOString()}–${x.endsAt?.toISOString()}`;
     const lines = [
       ...overlaps.map((o) => `OVERLAP: ${fmt(o.a)}  ⟷  ${fmt(o.b)}`),
       ...tight.map((t) => `TIGHT (${Math.round(t.gapMinutes)}m gap): ${fmt(t.a)}  →  ${fmt(t.b)}`),
     ];
+    if (lines.length === 0) lines.push("No conflicts among the activities that could be checked.");
+    // Coverage: a clean result only means "clean" if the range was examined.
+    lines.push(`coverage: ${considered} scheduled activities checked in this range.`);
+    if (skippedUntimed.length > 0) {
+      lines.push(
+        `⚠ NOT CHECKED — ${skippedUntimed.length} in-range activities have no usable times and were skipped:`,
+        ...skippedUntimed.map(
+          (a) => `  activity #${a.id} ${a.title} (${a.companyName ?? a.jobTitle}) due ${fmtDate(a.dueAt)}`,
+        ),
+        "Give them real times with update_activity (starts_at/ends_at) to include them.",
+      );
+    }
     return text(lines.join("\n"));
   },
 );
 
 server.tool(
+  "list_untimed",
+  "Read-only. Activities between `from` and `to` that carry a due date but no starts_at — the conflict check's blind spot. Fill each deliberately with update_activity (a due DATE is not a time; times are never guessed from it).",
+  { from: z.string().describe("ISO datetime"), to: z.string().describe("ISO datetime") },
+  async ({ from, to }) => {
+    const rows = svc.listUntimed(new Date(from), new Date(to));
+    if (rows.length === 0) return text("No untimed activities in that range — everything due there carries real times.");
+    const lines = rows.map(
+      (a) =>
+        `activity #${a.id} [${a.category}] ${a.title} — job #${a.jobId} ${a.jobTitle}${a.companyName ? ` @ ${a.companyName}` : ""} (due ${fmtDate(a.dueAt)}${a.completedAt ? ", completed" : ""})`,
+    );
+    return text(`${rows.length} untimed activities:\n${lines.join("\n")}\nSet starts_at/ends_at via update_activity to make them conflict-checkable.`);
+  },
+);
+
+server.tool(
   "add_availability",
-  "Record a time window offered to a recruiter, so the same slot is never offered twice. Reversible context, not a booking.",
+  "Write, reversible context (not a booking). Record a time window from start to end offered to a recruiter, with an optional note on who it was offered to, so the same slot is never offered twice.",
   {
     start: z.string().describe("ISO datetime"),
     end: z.string().describe("ISO datetime"),
@@ -579,7 +609,7 @@ server.tool(
 
 server.tool(
   "list_availability",
-  "List offered availability windows in a range, with whether each is still free or already taken by a booked activity. Read-only.",
+  "Read-only. List offered availability windows between `from` and `to`, showing whether each is still free or already taken by a booked activity.",
   { from: z.string(), to: z.string() },
   async ({ from, to }) => {
     const rows = svc.listAvailability(new Date(from), new Date(to));
@@ -596,7 +626,7 @@ server.tool(
 
 server.tool(
   "mark_availability_taken",
-  "Mark an offered availability window as consumed by a booked activity, so it is no longer offered elsewhere.",
+  "Write, reversible (mark with a different activity). Mark the availability window at id as consumed by the booked activity at activity_id, so it is no longer offered elsewhere.",
   { id: z.number().int(), activity_id: z.number().int() },
   async ({ id, activity_id }) => {
     const w = svc.markAvailabilityTaken(id, activity_id);
@@ -607,7 +637,7 @@ server.tool(
 
 server.tool(
   "add_contact",
-  "Attach a person to a job with a role (recruiter, coordinator, interviewer, hiring_manager, agency, referrer). Reuses an existing contact matching the same name and email; re-adding the same person updates their role on that job.",
+  "Write, reversible (re-add to change the role). Attach a person by name to the job at job_id with their email, phone, title, company, and a role on THIS job: recruiter, coordinator, interviewer, hiring_manager, agency, referrer. Reuses an existing contact matching the same name and email; re-adding the same person updates their role.",
   {
     job_id: z.number().int(),
     name: z.string(),
@@ -626,7 +656,7 @@ server.tool(
 
 server.tool(
   "list_contacts",
-  "List the people attached to a job with their roles and contact details. Read-only.",
+  "Read-only. List the people attached to the job at job_id with their roles and contact details.",
   { job_id: z.number().int() },
   async ({ job_id }) => {
     const rows = svc.listContactsForJob(job_id);
@@ -642,7 +672,7 @@ server.tool(
 
 server.tool(
   "delete_activity",
-  "DESTRUCTIVE and irreversible: permanently deletes one activity (e.g. one logged by mistake). Prefer update_activity to correct instead of delete when the event actually happened.",
+  "Write, DESTRUCTIVE and irreversible: permanently deletes the activity at activity_id (e.g. one logged by mistake). Prefer update_activity to correct instead of delete when the event actually happened.",
   { activity_id: z.number().int() },
   async ({ activity_id }) => {
     const existing = svc.listActivitiesAcrossJobs().find((a) => a.id === activity_id);
@@ -654,7 +684,7 @@ server.tool(
 
 server.tool(
   "update_note",
-  "Replace a note's text in place. Reversible by updating again (the previous text is overwritten, so quote it back if you need to preserve it).",
+  "Write. Replace the body of the note at note_id in place. Reversible only by updating again — the previous text is overwritten, so quote it back first if you need to preserve it.",
   { note_id: z.number().int(), body: z.string() },
   async ({ note_id, body }) => {
     const updated = svc.updateNote(note_id, body);
@@ -665,7 +695,7 @@ server.tool(
 
 server.tool(
   "delete_note",
-  "DESTRUCTIVE and irreversible: permanently deletes one note.",
+  "Write, DESTRUCTIVE and irreversible: permanently deletes the note at note_id.",
   { note_id: z.number().int() },
   async ({ note_id }) => {
     svc.deleteNote(note_id);
@@ -675,7 +705,7 @@ server.tool(
 
 server.tool(
   "add_note",
-  "Add a note (markdown) to a job.",
+  "Write, reversible via update_note/delete_note. Add a markdown note with the given body to the job at job_id. Notes are searchable, so names, requisition numbers, and details recorded here are findable later.",
   { job_id: z.number().int(), body: z.string() },
   async ({ job_id, body }) => {
     if (!svc.getJob(job_id)) return text(`No job with id ${job_id}.`);
@@ -686,7 +716,7 @@ server.tool(
 
 server.tool(
   "search",
-  "Search jobs by title, company, or location.",
+  "Read-only. Search live jobs by a text query matched against title, company, location, the full job description, AND note text — so recruiter names, requisition numbers, or anything recorded in a note is findable here.",
   { query: z.string() },
   async ({ query }) => {
     const results = svc.search(query);
@@ -701,7 +731,7 @@ server.tool(
 
 server.tool(
   "get_metrics",
-  "Board metrics: totals per stage, weekly applications, conversion and response rates, average days in stage.",
+  "Read-only. Board metrics over live jobs: totals per stage, weekly applications, conversion and response rates, average days in stage, source breakdown (applied vs reachout vs referral), and the interview-rounds funnel (screens, hiring manager, technical, final, offers, unclassified).",
   {},
   async () => {
     const m = svc.getMetrics();

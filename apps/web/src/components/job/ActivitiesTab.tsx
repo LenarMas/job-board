@@ -58,6 +58,24 @@ export function ActivitiesTab({
   }
 
   const [confirmingEventId, setConfirmingEventId] = useState<number | null>(null);
+  // "add time" affordance: due-date-only activities are invisible to the
+  // conflict check until they get real times.
+  const [timingId, setTimingId] = useState<number | null>(null);
+  const [timeStart, setTimeStart] = useState("");
+  const [timeEnd, setTimeEnd] = useState("");
+
+  async function saveTimes(id: number) {
+    if (!timeStart) return;
+    await fetch(`/api/activities/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ startsAt: timeStart, endsAt: timeEnd || null }),
+    });
+    setTimingId(null);
+    setTimeStart("");
+    setTimeEnd("");
+    router.refresh();
+  }
 
   async function removeStageEvent(id: number) {
     setConfirmingEventId(null);
@@ -100,6 +118,41 @@ export function ActivitiesTab({
                 </>
               )}
             </p>
+          )}
+          {!a.startsAt && a.dueAt && !a.completedAt && (
+            timingId === a.id ? (
+              <span className="mt-1 flex flex-wrap items-center gap-1 text-xs">
+                <input
+                  type="datetime-local"
+                  value={timeStart}
+                  onChange={(e) => setTimeStart(e.target.value)}
+                  className="rounded border border-slate-300 px-1 py-0.5"
+                  aria-label="Start time"
+                />
+                <span className="text-slate-400">–</span>
+                <input
+                  type="datetime-local"
+                  value={timeEnd}
+                  onChange={(e) => setTimeEnd(e.target.value)}
+                  className="rounded border border-slate-300 px-1 py-0.5"
+                  aria-label="End time"
+                />
+                <button onClick={() => saveTimes(a.id)} className="font-medium text-indigo-600 hover:underline">
+                  save
+                </button>
+                <button onClick={() => setTimingId(null)} className="text-slate-400 hover:underline">
+                  cancel
+                </button>
+              </span>
+            ) : (
+              <button
+                onClick={() => setTimingId(a.id)}
+                className="mt-0.5 block text-xs text-indigo-500 hover:underline"
+                title="Has a due date but no time — invisible to conflict checks until timed"
+              >
+                + add time
+              </button>
+            )
           )}
           {a.note && <p className="truncate text-xs text-slate-400">{a.note}</p>}
         </div>

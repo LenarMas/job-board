@@ -283,6 +283,32 @@ describe("scheduling", () => {
     expect(svc.findConflicts(at(0), at(23), 45).overlaps).toHaveLength(0);
   });
 
+  it("find_conflicts reports coverage: what was examined and what was skipped untimed", () => {
+    const job = svc.createJob({ title: "A", company: "Acme", stageName: "interview" });
+    svc.createActivity({ jobId: job.id, category: "hm", title: "Timed", startsAt: at(11), endsAt: at(11, 45) });
+    // due date only — pre-Tier-2 shape, invisible to the overlap check
+    svc.createActivity({ jobId: job.id, category: "screen", title: "Untimed screen", dueAt: at(12) });
+    // start but no end — also not checkable
+    svc.createActivity({ jobId: job.id, category: "technical", title: "Half-timed", startsAt: at(15) });
+
+    const res = svc.findConflicts(at(0), at(23));
+    expect(res.considered).toBe(1);
+    expect(res.overlaps).toHaveLength(0);
+    expect(res.skippedUntimed.map((a) => a.title).sort()).toEqual(["Half-timed", "Untimed screen"]);
+  });
+
+  it("list_untimed returns due-dated activities with no start time, in range", () => {
+    const job = svc.createJob({ title: "A", company: "Acme", stageName: "interview" });
+    svc.createActivity({ jobId: job.id, category: "screen", title: "Needs a time", dueAt: at(12) });
+    svc.createActivity({ jobId: job.id, category: "hm", title: "Already timed", dueAt: at(13), startsAt: at(13), endsAt: at(13, 45) });
+    svc.createActivity({ jobId: job.id, category: "final", title: "Out of range", dueAt: new Date(Date.UTC(2026, 8, 30)) });
+    const rows = svc.listUntimed(at(0), at(23));
+    expect(rows.map((a) => a.title)).toEqual(["Needs a time"]);
+    // archived jobs drop out here too
+    svc.archiveJob(job.id);
+    expect(svc.listUntimed(at(0), at(23))).toHaveLength(0);
+  });
+
   it("availability windows can be listed and marked taken", () => {
     const w = svc.addAvailability(at(10), at(13, 30), "offered to agency");
     const job = svc.createJob({ title: "A", stageName: "interview" });

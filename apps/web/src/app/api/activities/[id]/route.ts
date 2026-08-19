@@ -11,6 +11,8 @@ export async function PATCH(request: Request, { params }: Params) {
   if ("note" in body) patch.note = body.note || null;
   if ("category" in body) patch.category = body.category;
   if ("dueAt" in body) patch.dueAt = body.dueAt ? new Date(body.dueAt) : null;
+  if ("startsAt" in body) patch.startsAt = body.startsAt ? new Date(body.startsAt) : null;
+  if ("endsAt" in body) patch.endsAt = body.endsAt ? new Date(body.endsAt) : null;
   if ("completed" in body) {
     patch.completedAt = body.completed ? new Date() : null;
   }
