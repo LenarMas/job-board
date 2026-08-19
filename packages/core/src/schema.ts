@@ -90,6 +90,14 @@ export const jobs = sqliteTable(
     externalId: text("external_id"),
     calendarEventId: text("calendar_event_id"),
     calendarEventUrl: text("calendar_event_url"),
+    // Provenance: the exact message/channel this card came from.
+    sourceMessageId: text("source_message_id"),
+    sourceChannel: text("source_channel", {
+      enum: ["email", "linkedin", "referral", "board", "other"],
+    }),
+    // Which resume / cover letter file was sent for this application.
+    resumePath: text("resume_path"),
+    coverLetterPath: text("cover_letter_path"),
     // How the opportunity originated (cold application vs recruiter reachout
     // vs referral); null means untagged.
     source: text("source", { enum: jobSources }),

@@ -307,6 +307,100 @@ describe("scheduling", () => {
   });
 });
 
+describe("duplicates, upsert, staleness", () => {
+  it("upsert does not create a second row and reports the match", () => {
+    const first = svc.upsertJob({
+      title: "Platform Engineer",
+      company: "JPMorgan Chase & Co.",
+      stageName: "applied",
+      externalId: "210747612",
+    });
+    expect(first.created).toBe(true);
+
+    // same requisition at a differently-written company name
+    const again = svc.upsertJob({
+      title: "Platform Engineer II",
+      company: "JPMorganChase",
+      externalId: "210747612",
+      url: "https://example.test/jpmc/210747612",
+      notes: ["recruiter pinged"],
+    });
+    expect(again.created).toBe(false);
+    expect(again.matchedOn).toBe("external_id");
+    expect(again.job.id).toBe(first.job.id);
+    expect(again.job.url).toBe("https://example.test/jpmc/210747612"); // empty field filled
+    expect(svc.listNotes(first.job.id)).toHaveLength(1);
+
+    // company+title match, and by url
+    const byTitle = svc.upsertJob({ title: "platform engineer", company: "JPMorgan Chase & Co." });
+    expect(byTitle.created).toBe(false);
+    expect(byTitle.matchedOn).toBe("company+title");
+    const byUrl = svc.upsertJob({ title: "X", url: "https://example.test/jpmc/210747612" });
+    expect(byUrl.created).toBe(false);
+    expect(byUrl.matchedOn).toBe("url");
+
+    expect(svc.listJobs()).toHaveLength(1); // still one row
+  });
+
+  it("upsert applies children atomically on create", () => {
+    const res = svc.upsertJob({
+      title: "SRE",
+      company: "Acme",
+      stageName: "interview",
+      appliedAt: daysAgo(10),
+      activities: [
+        { category: "apply", title: "Applied", completedAt: daysAgo(10) },
+        { category: "screen", title: "Phone screen", completedAt: daysAgo(5) },
+      ],
+      notes: ["backfilled from history"],
+    });
+    expect(res.created).toBe(true);
+    expect(res.job.stage?.name).toBe("interview");
+    expect(svc.listActivities(res.job.id)).toHaveLength(2);
+    expect(svc.listNotes(res.job.id)).toHaveLength(1);
+  });
+
+  it("find_duplicates flags fuzzy company + similar title and requisition matches", () => {
+    svc.createJob({ title: "Senior Platform Engineer", company: "JPMorgan Chase & Co.", stageName: "applied" });
+    svc.createJob({ title: "Senior Platform Engineer", company: "JPMorganChase", stageName: "wishlist" });
+    svc.createJob({ title: "Data Analyst", company: "Beta", stageName: "applied" });
+    const pairs = svc.findDuplicates();
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0]!.reason).toContain("similar title");
+    // archived cards stop being flagged
+    svc.archiveJob(pairs[0]!.b.id);
+    expect(svc.findDuplicates()).toHaveLength(0);
+  });
+
+  it("search covers notes and the description", () => {
+    const job = svc.createJob({
+      title: "SRE",
+      company: "Acme",
+      stageName: "applied",
+      description: "Kubernetes fleet with Karpenter autoscaling",
+    });
+    svc.createNote({ jobId: job.id, body: "Recruiter mentioned Datadog migration" });
+    expect(svc.search("Karpenter").map((r) => r.id)).toContain(job.id);
+    expect(svc.search("Datadog").map((r) => r.id)).toContain(job.id);
+    expect(svc.search("nonexistent-term")).toHaveLength(0);
+  });
+
+  it("list_stale finds quiet jobs and overdue activities", () => {
+    const quiet = svc.createJob({ title: "Quiet", company: "Acme", stageName: "applied", createdAt: daysAgo(30) });
+    svc.createActivity({ jobId: quiet.id, category: "apply", title: "Applied", createdAt: daysAgo(20) });
+    const active = svc.createJob({ title: "Active", company: "Beta", stageName: "interview", createdAt: daysAgo(30) });
+    svc.createActivity({ jobId: active.id, category: "screen", title: "Screen", createdAt: daysAgo(1) });
+    svc.createActivity({ jobId: active.id, category: "follow_up", title: "Chase them", dueAt: daysAgo(3) });
+    const wishlistOnly = svc.createJob({ title: "Someday", stageName: "wishlist", createdAt: daysAgo(60) });
+    void wishlistOnly;
+
+    const { staleJobs, overdue } = svc.listStale(7);
+    expect(staleJobs.map((j) => j.title)).toEqual(["Quiet"]); // wishlist and active excluded
+    expect(overdue).toHaveLength(1);
+    expect(overdue[0]!.title).toBe("Chase them");
+  });
+});
+
 describe("metrics", () => {
   function seedPipeline() {
     // 4 applied total: 1 still applied, 2 interviewed (1 of those got an

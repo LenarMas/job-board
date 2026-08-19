@@ -9,16 +9,28 @@ layer.
 | Tool | What it does |
 |---|---|
 | `list_jobs(stage?, query?)` | List jobs, optionally by stage or text filter |
-| `get_job(id)` | Full details for one job |
-| `add_job(title, company?, stage?, source?, ...)` | Create a job |
+| `get_job(id)` | Full details for one job: fields, comp, schedule, contacts, provenance |
+| `add_job(title, company?, stage?, ...)` | Create a job — idempotent: matches an existing job by url, requisition id, or company+title instead of duplicating |
+| `upsert_job(..., activities?, notes?)` | Create-or-update a job with activities and notes in one atomic call (backfills) |
+| `update_job(id, ...)` | Patch any field in place: title, company, salary, comp, JD provenance, requisition id, calendar link, applied date, … |
 | `move_job(id, stage)` | Move a job between stages |
+| `archive_job(id)` / `restore_job(id)` / `list_archived()` | Reversible soft delete — archived jobs drop out of board, search, and metrics |
+| `merge_jobs(source_id, target_id)` | Consolidate a duplicate: moves children, fills empty fields, archives the source |
+| `find_duplicates()` | Flag likely duplicate pairs (fuzzy company + similar title, or same requisition id) |
 | `set_source(job_id, source)` | Record how a job originated: applied, reachout, referral, other |
-| `log_activity(job_id, category, title, ...)` | Log an activity — categories: apply, screen, interview, hm, technical, final, follow_up, offer, other |
+| `log_activity(job_id, category, title, ...)` | Log an activity with optional schedule (starts/ends, timezone), meeting details, and interviewer; warns on conflicts |
 | `list_activities(category?, job_id?)` | List activities board-wide; `category: "unclassified"` finds interviews with no round type |
-| `update_activity(activity_id, ...)` | Retag, rename, re-date, or complete an existing activity |
-| `add_note(job_id, body)` | Add a markdown note |
-| `search(query)` | Search titles, companies, locations |
-| `get_metrics()` | Stage totals, conversion rates, response rate, weekly applications |
+| `update_activity(activity_id, ...)` | Retag, rename, re-schedule, or complete an existing activity |
+| `delete_activity(activity_id)` | Permanently delete one activity (destructive) |
+| `find_conflicts(from, to, gap_minutes?)` | Overlapping or too-tight scheduled activities in a range |
+| `add_availability(start, end, note?)` / `list_availability(from, to)` / `mark_availability_taken(id, activity_id)` | Track interview slots offered to recruiters |
+| `add_contact(job_id, name, role?, ...)` / `list_contacts(job_id)` | People on a job with roles: recruiter, coordinator, interviewer, hiring_manager, agency, referrer |
+| `add_note(job_id, body)` / `update_note(note_id, body)` / `delete_note(note_id)` | Notes (delete is destructive) |
+| `search(query)` | Search titles, companies, locations, descriptions, and notes |
+| `list_stale(days)` | Follow-up list: quiet jobs and overdue activities |
+| `get_metrics()` | Stage totals, conversion rates, response rate, sources, interview rounds |
+
+There is deliberately no hard delete over MCP — archiving is the destructive-adjacent operation, and it is reversible.
 
 ## Setup
 

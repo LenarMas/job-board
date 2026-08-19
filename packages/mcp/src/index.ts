@@ -100,6 +100,11 @@ server.tool(
       lines.push(`calendar: ${job.calendarEventUrl ?? job.calendarEventId}`);
     }
     if (job.jdSourceUrl) lines.push(`jd captured from: ${job.jdSourceUrl}${job.jdCapturedAt ? ` on ${fmtDate(job.jdCapturedAt)}` : ""}`);
+    if (job.sourceChannel || job.sourceMessageId) {
+      lines.push(`came from: ${job.sourceChannel ?? "?"}${job.sourceMessageId ? ` (message ${job.sourceMessageId})` : ""}`);
+    }
+    if (job.resumePath) lines.push(`resume sent: ${job.resumePath}`);
+    if (job.coverLetterPath) lines.push(`cover letter: ${job.coverLetterPath}`);
     if (activities.length > 0) {
       lines.push(`activities (${activities.length}):`);
       for (const a of activities.slice(0, 15)) {
@@ -147,9 +152,12 @@ server.tool(
       .enum(jobSources)
       .optional()
       .describe("How the opportunity originated: applied, reachout (recruiter contacted you), referral, other"),
+    external_id: z.string().optional().describe("Employer requisition id — enables exact duplicate matching"),
   },
-  async ({ title, company, stage, url, location, salary, description, source }) => {
-    const job = svc.createJob({
+  async ({ title, company, stage, url, location, salary, description, source, external_id }) => {
+    // Idempotent: matches an existing live job by url, requisition id, or
+    // company+title instead of creating a duplicate.
+    const res = svc.upsertJob({
       title,
       company,
       stageName: stage,
@@ -157,9 +165,110 @@ server.tool(
       location,
       salary,
       description,
+      source,
+      externalId: external_id,
     });
-    if (source) svc.updateJob(job.id, { source });
-    return text(`Created job #${job.id}: ${title} in ${stage}.`);
+    if (res.created) {
+      return text(`Created job #${res.job.id}: ${title} in ${stage}.`);
+    }
+    return text(
+      `Matched existing job #${res.job.id} (${res.job.title}) by ${res.matchedOn} — no duplicate created. ` +
+        `Empty fields were filled from your input; use update_job to change anything else.`,
+    );
+  },
+);
+
+server.tool(
+  "upsert_job",
+  "Create-or-update a job with its activities and notes in ONE atomic call (ideal for backfilling history). Matches an existing live job by url, requisition id, or company+title: on a match it fills only empty fields and appends the children; otherwise it creates. Reports created vs matched.",
+  {
+    title: z.string(),
+    company: z.string().optional(),
+    stage: stageEnum.optional(),
+    url: z.string().optional(),
+    location: z.string().optional(),
+    salary: z.string().optional(),
+    description: z.string().optional(),
+    source: z.enum(jobSources).optional(),
+    external_id: z.string().optional(),
+    applied_at: z.string().optional().describe("ISO date"),
+    activities: z
+      .array(
+        z.object({
+          category: z.enum(activityCategories),
+          title: z.string(),
+          note: z.string().optional(),
+          due_at: z.string().optional(),
+          completed_at: z.string().optional(),
+          starts_at: z.string().optional(),
+          ends_at: z.string().optional(),
+        }),
+      )
+      .optional(),
+    notes: z.array(z.string()).optional(),
+  },
+  async ({ activities: acts, notes: noteBodies, applied_at, external_id, stage, ...rest }) => {
+    const res = svc.upsertJob({
+      ...rest,
+      stageName: stage,
+      externalId: external_id,
+      appliedAt: applied_at ? new Date(applied_at) : undefined,
+      activities: acts?.map((a) => ({
+        category: a.category,
+        title: a.title,
+        note: a.note,
+        dueAt: a.due_at ? new Date(a.due_at) : undefined,
+        completedAt: a.completed_at ? new Date(a.completed_at) : undefined,
+        startsAt: a.starts_at ? new Date(a.starts_at) : undefined,
+        endsAt: a.ends_at ? new Date(a.ends_at) : undefined,
+      })),
+      notes: noteBodies,
+    });
+    return text(
+      `${res.created ? "Created" : `Matched existing (by ${res.matchedOn})`} job #${res.job.id} (${res.job.title})` +
+        ` with ${acts?.length ?? 0} activities and ${noteBodies?.length ?? 0} notes applied atomically.`,
+    );
+  },
+);
+
+server.tool(
+  "find_duplicates",
+  "Read-only: flag live job pairs that look like the same posting entered twice — same/fuzzy company plus similar title, or matching requisition id. Consolidate a pair with merge_jobs.",
+  {},
+  async () => {
+    const pairs = svc.findDuplicates();
+    if (pairs.length === 0) return text("No likely duplicates found.");
+    const lines = pairs.map(
+      (p) =>
+        `#${p.a.id} "${p.a.title}" ⟷ #${p.b.id} "${p.b.title}" @ ${p.a.companyName ?? "?"} (${p.reason})`,
+    );
+    return text(`${pairs.length} likely duplicate pair(s):\n${lines.join("\n")}\nUse merge_jobs(source_id, target_id) to consolidate.`);
+  },
+);
+
+server.tool(
+  "list_stale",
+  "Read-only follow-up list: live jobs (excluding wishlist and rejected) with no activity in N days, and incomplete activities past their due date.",
+  { days: z.number().int().min(1).default(7) },
+  async ({ days }) => {
+    const { staleJobs, overdue } = svc.listStale(days);
+    if (staleJobs.length === 0 && overdue.length === 0) {
+      return text(`Nothing stale: every live job has activity within ${days} days and nothing is overdue.`);
+    }
+    const lines: string[] = [];
+    if (staleJobs.length > 0) {
+      lines.push(`${staleJobs.length} jobs quiet for ${days}+ days:`);
+      for (const j of staleJobs.slice(0, 50)) {
+        lines.push(`  #${j.id} ${j.title}${j.companyName ? ` @ ${j.companyName}` : ""} [${j.stageName}] last activity ${fmtDate(j.lastActivityAt)}`);
+      }
+    }
+    if (overdue.length > 0) {
+      lines.push(`${overdue.length} overdue activities:`);
+      for (const a of overdue.slice(0, 50)) {
+        lines.push(`  activity #${a.id} [${a.category}] ${a.title} — job #${a.jobId} ${a.jobTitle}${a.companyName ? ` @ ${a.companyName}` : ""} (due ${fmtDate(a.dueAt)})`);
+      }
+    }
+    return text(lines.join("\n"));
   },
 );
 
@@ -185,8 +294,12 @@ server.tool(
     external_id: z.string().optional().describe("Employer requisition id, e.g. 210747612; unique per company"),
     calendar_event_id: z.string().optional(),
     calendar_event_url: z.string().optional(),
+    source_channel: z.enum(["email", "linkedin", "referral", "board", "other"]).optional().describe("Where this card came from"),
+    source_message_id: z.string().optional().describe("Id of the exact email/message it came from"),
+    resume_path: z.string().optional().describe("Which resume file was sent for this application"),
+    cover_letter_path: z.string().optional(),
   },
-  async ({ id, applied_at, comp_min, comp_max, comp_unit, comp_basis, comp_source, jd_source_url, external_id, calendar_event_id, calendar_event_url, ...rest }) => {
+  async ({ id, applied_at, comp_min, comp_max, comp_unit, comp_basis, comp_source, jd_source_url, external_id, calendar_event_id, calendar_event_url, source_channel, source_message_id, resume_path, cover_letter_path, ...rest }) => {
     const patch: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(rest)) {
       if (value !== undefined) patch[key] = value;
@@ -203,6 +316,10 @@ server.tool(
     if (external_id !== undefined) patch.externalId = external_id || null;
     if (calendar_event_id !== undefined) patch.calendarEventId = calendar_event_id || null;
     if (calendar_event_url !== undefined) patch.calendarEventUrl = calendar_event_url || null;
+    if (source_channel !== undefined) patch.sourceChannel = source_channel;
+    if (source_message_id !== undefined) patch.sourceMessageId = source_message_id || null;
+    if (resume_path !== undefined) patch.resumePath = resume_path || null;
+    if (cover_letter_path !== undefined) patch.coverLetterPath = cover_letter_path || null;
     if (rest.description !== undefined) patch.jdCapturedAt = new Date();
     if (Object.keys(patch).length === 0) return text("Nothing to update.");
     const updated = svc.updateJob(id, patch);

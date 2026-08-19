@@ -214,6 +214,226 @@ export function createServices(db: Db) {
       .get();
   }
 
+  // ---- duplicate detection / idempotent creation ----
+
+  /** "JPMorgan Chase & Co." and "JPMorganChase" both become "jpmorganchase". */
+  function normalizeCompany(name: string): string {
+    return name
+      .toLowerCase()
+      .replace(/&/g, " and ")
+      .replace(/\b(inc|llc|ltd|co|corp|corporation|company|and|the)\b\.?/g, "")
+      .replace(/[^a-z0-9]/g, "");
+  }
+
+  function titleTokens(title: string): Set<string> {
+    return new Set(
+      title
+        .toLowerCase()
+        .split(/[^a-z0-9+#]+/)
+        .filter((t) => t.length > 1),
+    );
+  }
+
+  function titleSimilarity(a: string, b: string): number {
+    const ta = titleTokens(a);
+    const tb = titleTokens(b);
+    if (ta.size === 0 || tb.size === 0) return 0;
+    let common = 0;
+    for (const t of ta) if (tb.has(t)) common++;
+    return common / Math.min(ta.size, tb.size);
+  }
+
+  /**
+   * Live jobs that look like the same posting entered twice: same or
+   * fuzzy-matching company plus similar title, or matching requisition id.
+   */
+  function findDuplicates() {
+    const rows = db
+      .select({
+        id: jobs.id,
+        title: jobs.title,
+        externalId: jobs.externalId,
+        companyName: companies.name,
+      })
+      .from(jobs)
+      .leftJoin(companies, eq(jobs.companyId, companies.id))
+      .where(isNull(jobs.archivedAt))
+      .all();
+    const pairs: { a: (typeof rows)[number]; b: (typeof rows)[number]; reason: string }[] = [];
+    const byCompany = new Map<string, typeof rows>();
+    for (const row of rows) {
+      const key = normalizeCompany(row.companyName ?? "");
+      const list = byCompany.get(key) ?? [];
+      list.push(row);
+      byCompany.set(key, list);
+    }
+    for (const [key, list] of byCompany) {
+      if (!key) continue; // don't pair company-less jobs with each other
+      for (let i = 0; i < list.length; i++) {
+        for (let j = i + 1; j < list.length; j++) {
+          const a = list[i]!;
+          const b = list[j]!;
+          if (a.externalId && a.externalId === b.externalId) {
+            pairs.push({ a, b, reason: `same requisition id ${a.externalId}` });
+          } else if (titleSimilarity(a.title, b.title) >= 0.8) {
+            pairs.push({ a, b, reason: "same company, similar title" });
+          }
+        }
+      }
+    }
+    return pairs;
+  }
+
+  /**
+   * Find an existing live job this create would duplicate: same URL, same
+   * requisition id at the same company, or same company + same title.
+   */
+  function findMatchingJob(input: {
+    title: string;
+    company?: string;
+    url?: string;
+    externalId?: string;
+  }) {
+    if (input.url) {
+      const byUrl = findJobByUrl(input.url);
+      if (byUrl) return { job: byUrl, matchedOn: "url" as const };
+    }
+    if (!input.company) return null;
+    const companyKey = normalizeCompany(input.company);
+    const candidates = db
+      .select({ job: jobs, companyName: companies.name })
+      .from(jobs)
+      .leftJoin(companies, eq(jobs.companyId, companies.id))
+      .where(isNull(jobs.archivedAt))
+      .all()
+      .filter((r) => normalizeCompany(r.companyName ?? "") === companyKey);
+    if (input.externalId) {
+      const byReq = candidates.find((r) => r.job.externalId === input.externalId);
+      if (byReq) return { job: byReq.job, matchedOn: "external_id" as const };
+    }
+    const byTitle = candidates.find(
+      (r) => r.job.title.trim().toLowerCase() === input.title.trim().toLowerCase(),
+    );
+    if (byTitle) return { job: byTitle.job, matchedOn: "company+title" as const };
+    return null;
+  }
+
+  /**
+   * Idempotent create-or-update with children, in one transaction: matches an
+   * existing live job (url, requisition id, or company+title), patches only
+   * empty fields on a match, creates otherwise, then appends the given
+   * activities and notes. Reports whether it created or matched.
+   */
+  function upsertJob(input: {
+    title: string;
+    company?: string;
+    stageName?: string;
+    url?: string;
+    location?: string;
+    salary?: string;
+    description?: string;
+    source?: (typeof jobs.$inferInsert)["source"];
+    externalId?: string;
+    appliedAt?: Date;
+    activities?: {
+      category: ActivityCategory;
+      title: string;
+      note?: string;
+      dueAt?: Date;
+      completedAt?: Date;
+      startsAt?: Date;
+      endsAt?: Date;
+    }[];
+    notes?: string[];
+  }) {
+    return db.transaction(() => {
+      const match = findMatchingJob(input);
+      let job;
+      let created: boolean;
+      if (match) {
+        created = false;
+        const fill: Partial<typeof jobs.$inferInsert> = {};
+        for (const key of ["url", "location", "salary", "description", "source", "appliedAt", "externalId"] as const) {
+          const value = input[key];
+          if (value && !match.job[key]) (fill as Record<string, unknown>)[key] = value;
+        }
+        job = Object.keys(fill).length > 0 ? updateJob(match.job.id, fill)! : match.job;
+      } else {
+        created = true;
+        job = createJob({
+          title: input.title,
+          company: input.company,
+          stageName: input.stageName ?? "wishlist",
+          url: input.url,
+          location: input.location,
+          salary: input.salary,
+          description: input.description,
+          appliedAt: input.appliedAt,
+        });
+        if (input.source || input.externalId) {
+          job = updateJob(job.id, { source: input.source, externalId: input.externalId })!;
+        }
+      }
+      if (match && input.stageName) {
+        const stage = getStageByName(job.boardId, input.stageName);
+        if (stage && stage.id !== job.stageId) moveJob(job.id, { stageId: stage.id });
+      }
+      for (const a of input.activities ?? []) {
+        createActivity({ jobId: job.id, ...a });
+      }
+      for (const body of input.notes ?? []) {
+        createNote({ jobId: job.id, body });
+      }
+      return { job: getJob(job.id)!, created, matchedOn: match?.matchedOn ?? null };
+    });
+  }
+
+  /**
+   * The follow-up list: live, non-rejected jobs with no activity in N days,
+   * plus incomplete activities past their due date.
+   */
+  function listStale(days: number) {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const lastActivity = new Map<number, Date>();
+    for (const a of db.select({ jobId: activities.jobId, createdAt: activities.createdAt }).from(activities).all()) {
+      const prev = lastActivity.get(a.jobId);
+      if (!prev || a.createdAt > prev) lastActivity.set(a.jobId, a.createdAt);
+    }
+    const staleJobs = db
+      .select({
+        id: jobs.id,
+        title: jobs.title,
+        createdAt: jobs.createdAt,
+        companyName: companies.name,
+        stageName: stages.name,
+      })
+      .from(jobs)
+      .leftJoin(companies, eq(jobs.companyId, companies.id))
+      .innerJoin(stages, eq(jobs.stageId, stages.id))
+      .where(isNull(jobs.archivedAt))
+      .all()
+      .filter((j) => j.stageName !== "rejected" && j.stageName !== "wishlist")
+      .filter((j) => (lastActivity.get(j.id) ?? j.createdAt) < cutoff)
+      .map((j) => ({ ...j, lastActivityAt: lastActivity.get(j.id) ?? j.createdAt }));
+    const overdue = db
+      .select({
+        id: activities.id,
+        title: activities.title,
+        category: activities.category,
+        dueAt: activities.dueAt,
+        jobId: activities.jobId,
+        jobTitle: jobs.title,
+        companyName: companies.name,
+      })
+      .from(activities)
+      .innerJoin(jobs, and(eq(activities.jobId, jobs.id), isNull(jobs.archivedAt)))
+      .leftJoin(companies, eq(jobs.companyId, companies.id))
+      .where(and(isNull(activities.completedAt), isNotNull(activities.dueAt)))
+      .all()
+      .filter((a) => a.dueAt! < new Date());
+    return { staleJobs, overdue };
+  }
+
   // ---- archive / merge ----
 
   /** Reversible soft delete: hides the job everywhere, keeps its children. */
@@ -769,6 +989,8 @@ export function createServices(db: Db) {
             like(jobs.title, pattern),
             like(companies.name, pattern),
             like(jobs.location, pattern),
+            like(jobs.description, pattern),
+            sql`${jobs.id} in (select job_id from notes where body like ${pattern})`,
           ),
         ),
       )
@@ -1060,6 +1282,10 @@ export function createServices(db: Db) {
     restoreJob,
     listArchived,
     mergeJobs,
+    findDuplicates,
+    findMatchingJob,
+    upsertJob,
+    listStale,
     findJobByUrl,
     listJobs,
     moveJob,
