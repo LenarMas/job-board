@@ -3,8 +3,8 @@ import type { CapturedJob } from "./types";
 /**
  * The in-page capture panel. Unlike an action popup, it lives in the page
  * (inside a shadow root, so site CSS can't touch it), which means clicking
- * the page to copy something no longer destroys the form — edits stay until
- * you close it, save, or navigate.
+ * the page to copy something no longer destroys the form — the panel stays,
+ * saved or not, until you close it or navigate.
  */
 
 const SOURCE_LABELS: Record<CapturedJob["source"], string> = {
@@ -107,6 +107,9 @@ export class CapturePanel {
   constructor(private callbacks: PanelCallbacks) {
     this.host = document.createElement("div");
     this.host.id = "jobtrack-capture-panel";
+    // Born hidden: the toggle inverts `visible`, so a panel created visible
+    // would be hidden by the very click that created it.
+    this.host.style.display = "none";
     this.root = this.host.attachShadow({ mode: "closed" });
     const style = document.createElement("style");
     style.textContent = CSS;
@@ -201,11 +204,12 @@ export class CapturePanel {
         href: `${res.appUrl}/jobs/${res.job!.id}`,
         label: "Open in JobTrack ↗",
       };
+      // No auto-hide: the status link ("Open in JobTrack") must stay
+      // clickable until the user closes the panel themselves.
       if (res.duplicate) {
         this.setStatus("ok", `Already on your board (#${res.job!.id}).`, link);
       } else {
         this.setStatus("ok", `Saved to ${payload.stage} (#${res.job!.id}).`, link);
-        setTimeout(() => this.hide(), 1500);
       }
     } catch (err) {
       this.setStatus("error", err instanceof Error ? err.message : String(err));
