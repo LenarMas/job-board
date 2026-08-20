@@ -27,3 +27,10 @@ re-litigated later.
   (migration option A) and is complete (per-stage job counts match the UI), so
   the importer reads CSVs from `migration/raw/` and no network capture is
   needed.
+- **2026-08-19** The capture extension requests the `https://*/*` host
+  permission instead of relying on `activeTab`. Careers pages routinely embed
+  the actual posting and application form in a cross-origin ATS iframe
+  (Greenhouse et al.), and `activeTab` only covers the top frame's origin, so
+  frame injection failed everywhere the content mattered. A curated ATS domain
+  list would silently degrade on the next unknown ATS; all-sites matches what
+  every job-tracker extension in this category requests.
