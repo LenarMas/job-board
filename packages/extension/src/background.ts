@@ -5,11 +5,31 @@
 // JobTrack API calls (content scripts fetch with the page's origin, which the
 // API correctly refuses).
 
+export {}; // imported by tests; the extension build wraps this file in an IIFE
+
 const APP_URL = "http://localhost:3000";
 
 function flashBadge(tabId: number) {
   chrome.action.setBadgeText({ tabId, text: "✕" });
   setTimeout(() => chrome.action.setBadgeText({ tabId, text: "" }), 2000);
+}
+
+// Chrome rejects a batched allFrames injection outright when the page holds
+// even one frame it refuses to script (sandboxed without allow-scripts,
+// cross-origin frames beyond the activeTab grant, other extensions' frames).
+// The panel lives in the top frame, so inject that first — it must never be
+// hostage to frames we were never going to reach — then try the rest
+// best-effort.
+async function injectContent(tabId: number) {
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files: ["content.js"],
+    });
+  } catch (err) {
+    console.warn("JobTrack: some frames rejected injection, top frame only", err);
+  }
 }
 
 async function togglePanel(tab: chrome.tabs.Tab | undefined) {
@@ -20,18 +40,41 @@ async function togglePanel(tab: chrome.tabs.Tab | undefined) {
     return;
   }
   try {
-    await chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      files: ["content.js"],
-    });
+    await injectContent(tabId);
     // Direct invocation instead of tabs.sendMessage: the function is defined
     // synchronously by content.js, so there is no listener-registration race.
-    await chrome.scripting.executeScript({
+    const [injection] = await chrome.scripting.executeScript({
       target: { tabId },
-      func: () => (window as { __jobtrackTogglePanel?: () => void }).__jobtrackTogglePanel?.(),
+      func: () => {
+        const w = window as { __jobtrackTogglePanel?: () => void };
+        if (!w.__jobtrackTogglePanel) return false;
+        w.__jobtrackTogglePanel();
+        return true;
+      },
     });
-  } catch {
+    if (!injection?.result) throw new Error("content script did not initialize");
+  } catch (err) {
+    console.error("JobTrack: could not open the capture panel", err);
     flashBadge(tabId);
+  }
+}
+
+// Fan a function out across every reachable frame; when the batch is rejected
+// wholesale, fall back to the top frame alone rather than failing the action.
+async function execFrames<A extends unknown[], R>(
+  tabId: number,
+  func: (...args: A) => R,
+  args?: A,
+) {
+  try {
+    return await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func,
+      args,
+    });
+  } catch (err) {
+    console.warn("JobTrack: frame fan-out rejected, retrying top frame only", err);
+    return chrome.scripting.executeScript({ target: { tabId }, func, args });
   }
 }
 
@@ -50,11 +93,10 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 
 async function scrapeFrames(tabId: number) {
-  const injections = await chrome.scripting.executeScript({
-    target: { tabId, allFrames: true },
-    func: () =>
-      (window as { __jobtrackScrape?: () => unknown }).__jobtrackScrape?.() ?? null,
-  });
+  const injections = await execFrames(
+    tabId,
+    () => (window as { __jobtrackScrape?: () => unknown }).__jobtrackScrape?.() ?? null,
+  );
   return injections.map((i) => i.result ?? null);
 }
 
@@ -96,16 +138,16 @@ async function autofillFrames(tabId: number) {
       error: `No saved profile yet — fill it in at ${APP_URL}/profile first.`,
     };
   }
-  const injections = await chrome.scripting.executeScript({
-    target: { tabId, allFrames: true },
-    func: (p, r) =>
+  const injections = await execFrames(
+    tabId,
+    (p: unknown, r: unknown) =>
       (
         window as {
           __jobtrackAutofill?: (p: unknown, r: unknown) => { filled: number; resumeAttached: boolean };
         }
       ).__jobtrackAutofill?.(p, r) ?? null,
-    args: [profile, resume],
-  });
+    [profile, resume],
+  );
   let filled = 0;
   let resumeAttached = false;
   for (const i of injections) {
