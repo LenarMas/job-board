@@ -313,9 +313,10 @@ function metaContent(doc: Document, property: string): string | null {
 }
 
 // Query params that identify WHICH job a page shows (Greenhouse embeds use
-// gh_jid on the host company's own domain). These must survive
-// canonicalization or every job on that site dedupes into one.
-const JOB_ID_PARAMS = /(?:^|[?&])(gh_jid|jid|job_?id|posting_?id|currentJobId)=(\d+)/i;
+// gh_jid, Ashby embeds use ashby_jid with a UUID value, on the host company's
+// own domain). These must survive canonicalization or every job on that site
+// dedupes into one.
+const JOB_ID_PARAMS = /(?:^|[?&])(gh_jid|ashby_jid|jid|job_?id|posting_?id|currentJobId)=([\w-]+)/i;
 // Pure tracking params, safe to drop for a stable dedupe key.
 const TRACKING_PARAMS = /^(utm_\w+|gh_src|src|ref|refId|trackingId|trk|source)$/i;
 

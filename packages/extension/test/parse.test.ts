@@ -207,6 +207,20 @@ describe("URL canonicalization on embedded boards", () => {
     );
   });
 
+  it("keeps a UUID ashby_jid when the canonical link drops it", () => {
+    // Ashby embeds identify the job with a UUID, not a numeric id; the site's
+    // canonical link points at the generic careers page.
+    const doc = new DOMParser().parseFromString(
+      '<html><head><link rel="canonical" href="https://www.glenharbor.example/careers/" /></head><body></body></html>',
+      "text/html",
+    );
+    const url = canonicalUrl(
+      doc,
+      "https://www.glenharbor.example/careers/?ashby_jid=b569b567-7733-46bf-8aa2-4cd36be1e996",
+    );
+    expect(url).toContain("ashby_jid=b569b567-7733-46bf-8aa2-4cd36be1e996");
+  });
+
   it("strips tracking params but keeps meaningful ones", () => {
     expect(
       stripTrackingParams(
