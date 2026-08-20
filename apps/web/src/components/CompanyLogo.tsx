@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { monogram } from "@/lib/monogram";
 
 /**
  * Company avatar: favicon of the company's website when we know it, otherwise
@@ -50,7 +51,7 @@ export function CompanyLogo({
         backgroundColor: `hsl(${hue} 55% 45%)`,
       }}
     >
-      {label[0]!.toUpperCase()}
+      {monogram(label)}
     </span>
   );
 }
