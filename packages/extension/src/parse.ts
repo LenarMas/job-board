@@ -220,9 +220,24 @@ export function parseLinkedInApp(doc: Document): Omit<CapturedJob, "url"> | null
     }
   }
 
-  // Salary chips look like "$120K/yr - $140K/yr".
+  const aboutHeading = [...scope.querySelectorAll("*")].find(
+    (el) =>
+      el.childElementCount === 0 &&
+      el.textContent?.replace(/\s+/g, " ").trim().toLowerCase() === "about the job",
+  );
+
+  // Salary chips look like "$120K/yr - $140K/yr". The job's own chip lives in
+  // the top card, ABOVE the "About the job" heading; anything money-shaped
+  // past it belongs to the "Similar jobs" cards, so stop there rather than
+  // report another posting's pay.
   let salary = "";
   for (const el of scope.querySelectorAll("span, div, p")) {
+    if (
+      aboutHeading &&
+      aboutHeading.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING
+    ) {
+      break;
+    }
     const text = el.textContent?.replace(/\s+/g, " ").trim() ?? "";
     if (
       el.childElementCount === 0 &&
@@ -237,11 +252,6 @@ export function parseLinkedInApp(doc: Document): Omit<CapturedJob, "url"> | null
 
   // Description: the section headed by the literal "About the job".
   let description = "";
-  const aboutHeading = [...scope.querySelectorAll("*")].find(
-    (el) =>
-      el.childElementCount === 0 &&
-      el.textContent?.replace(/\s+/g, " ").trim().toLowerCase() === "about the job",
-  );
   if (aboutHeading) {
     let container: Element = aboutHeading;
     while (

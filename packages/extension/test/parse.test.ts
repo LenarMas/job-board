@@ -144,6 +144,48 @@ describe("authenticated LinkedIn app", () => {
     expect(job.location).not.toMatch(/promoted/i);
   });
 
+  // A job with no salary chip in its top card, but salary chips inside the
+  // "Similar jobs" cards below the description — like every real LinkedIn
+  // job page. The filler sentence keeps the description container walk from
+  // climbing past the JD section.
+  const filler = "We value boring technology and short feedback loops. ".repeat(12);
+  const similarJobsPage = (topCardChip: string) => `<!doctype html>
+    <html><head><title>Staff Infrastructure Engineer | Mistfall Systems | LinkedIn</title></head>
+    <body><main>
+      <div class="_9459244c">
+        <a href="https://www.linkedin.com/company/mistfall-systems/">Mistfall Systems</a>
+        <p><span>Remote, US</span> · <span>1 week ago</span> · <span>Over 50 people clicked apply</span></p>
+        ${topCardChip}
+      </div>
+      <div>
+        <div class="_a1b2c3d4">About the job</div>
+        <div><p>Own the Kubernetes platform end to end. ${filler}</p></div>
+      </div>
+      <div class="_44cc55dd">
+        <span>Similar jobs</span>
+        <div><span>Platform Engineer</span><span>$150K/yr - $180K/yr</span></div>
+        <div><span>Site Reliability Engineer</span><span>$140K/yr - $160K/yr</span></div>
+      </div>
+    </main></body></html>`;
+
+  it("does not take the salary from similar-job cards below the description", () => {
+    // Regression: the salary scan walked the whole <main> in document order,
+    // so a job with no chip of its own got the first similar-job card's pay.
+    const doc = new DOMParser().parseFromString(similarJobsPage(""), "text/html");
+    const job = parseJobPosting(doc, "https://www.linkedin.com/jobs/view/4000000002/");
+    expect(job.title).toBe("Staff Infrastructure Engineer");
+    expect(job.salary).toBe("");
+  });
+
+  it("still takes the job's own top-card salary chip when there is one", () => {
+    const doc = new DOMParser().parseFromString(
+      similarJobsPage('<span class="_55ee66ff">$170K/yr - $200K/yr</span>'),
+      "text/html",
+    );
+    const job = parseJobPosting(doc, "https://www.linkedin.com/jobs/view/4000000002/");
+    expect(job.salary).toBe("$170K/yr - $200K/yr");
+  });
+
   it("never picks the merged top-card container text as the location", () => {
     // Regression: the top card's wrapper div also contains "·" and the
     // activity words; its first segment is "<company><title> <location>".
