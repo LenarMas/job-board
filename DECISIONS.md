@@ -34,3 +34,9 @@ re-litigated later.
   frame injection failed everywhere the content mattered. A curated ATS domain
   list would silently degrade on the next unknown ATS; all-sites matches what
   every job-tracker extension in this category requests.
+- **2026-09-07** The capture panel's stage defaults to "applied" only when the
+  capture looks like applying: some frame contains a recognizable application
+  form (resume upload, or two distinct known fields — a lone newsletter email
+  box doesn't count), or the user clicks Autofill. Plain job views keep the
+  "wishlist" default, and a stage picked by hand is never overridden. Chosen
+  over always-applied so browsing captures stay honest for the metrics page.

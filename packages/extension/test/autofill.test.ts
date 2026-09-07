@@ -1,7 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { fillApplication, type AutofillProfile } from "../src/autofill";
+import {
+  detectApplicationForm,
+  fillApplication,
+  type AutofillProfile,
+} from "../src/autofill";
 
 const PROFILE: AutofillProfile = {
   firstName: "Avery",
@@ -62,5 +66,35 @@ describe("application autofill", () => {
     expect(val(doc, "#auto")).toBe("avery.quill@example.com"); // autocomplete attr wins
     expect(val(doc, "#g")).toBe(""); // no github in profile → untouched
     expect(result.filled).toBe(2);
+  });
+});
+
+describe("application form detection", () => {
+  it("recognizes a real application form", () => {
+    expect(detectApplicationForm(loadForm())).toBe(true);
+  });
+
+  it("a lone newsletter email box is not an application", () => {
+    const doc = new DOMParser().parseFromString(
+      `<body><form><input type="email" placeholder="Email" /><button>Subscribe</button></form></body>`,
+      "text/html",
+    );
+    expect(detectApplicationForm(doc)).toBe(false);
+  });
+
+  it("a resume upload alone is enough", () => {
+    const doc = new DOMParser().parseFromString(
+      `<body><form><label for="cv">Resume/CV</label><input id="cv" name="resume" type="file" /></form></body>`,
+      "text/html",
+    );
+    expect(detectApplicationForm(doc)).toBe(true);
+  });
+
+  it("a page with no inputs is not an application", () => {
+    const doc = new DOMParser().parseFromString(
+      `<body><h1>Platform Engineer</h1><p>Great job.</p></body>`,
+      "text/html",
+    );
+    expect(detectApplicationForm(doc)).toBe(false);
   });
 });

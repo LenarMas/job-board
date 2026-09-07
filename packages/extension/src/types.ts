@@ -9,5 +9,9 @@ export type CapturedJob = {
   source: "json-ld" | "site-selectors" | "page-fallback";
 };
 
+/** What a single frame reports back: the parsed job plus whether the frame
+ * contains an application form (drives the panel's stage default). */
+export type FrameScrape = CapturedJob & { applying: boolean };
+
 export type ScrapeRequest = { type: "jobtrack-scrape" };
 export type ScrapeResponse = { ok: true; job: CapturedJob } | { ok: false; error: string };
