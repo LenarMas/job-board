@@ -28,14 +28,20 @@ export async function POST(request: Request) {
   const svc = getServices();
   const url = typeof body.url === "string" && body.url ? body.url : undefined;
 
-  if (url) {
-    const existing = svc.findJobByUrl(url);
-    if (existing) {
-      return NextResponse.json(
-        { job: existing, duplicate: true },
-        { status: 200, headers },
-      );
-    }
+  // The same posting shows up at several URLs (ATS page vs LinkedIn listing,
+  // re-posted LinkedIn ids), so dedupe by url OR company+title, not url alone.
+  // The existing card is returned untouched — in particular its stage stays,
+  // so re-capturing an applied job never drags it back to wishlist.
+  const existing = svc.findMatchingJob({
+    title: body.title,
+    company: typeof body.company === "string" && body.company ? body.company : undefined,
+    url,
+  });
+  if (existing) {
+    return NextResponse.json(
+      { job: existing.job, duplicate: true, matchedOn: existing.matchedOn },
+      { status: 200, headers },
+    );
   }
 
   const stage = (DEFAULT_STAGES as readonly string[]).includes(body.stage)

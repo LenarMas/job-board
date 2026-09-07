@@ -95,6 +95,7 @@ export type PanelCallbacks = {
     error?: string;
     job?: { id: number };
     duplicate?: boolean;
+    matchedOn?: "url" | "external_id" | "company+title";
     appUrl?: string;
   }>;
   onAutofill: () => Promise<{ ok: boolean; error?: string; summary?: string }>;
@@ -207,7 +208,13 @@ export class CapturePanel {
       // No auto-hide: the status link ("Open in JobTrack") must stay
       // clickable until the user closes the panel themselves.
       if (res.duplicate) {
-        this.setStatus("ok", `Already on your board (#${res.job!.id}).`, link);
+        const why =
+          res.matchedOn === "company+title"
+            ? " — same title at this company"
+            : res.matchedOn === "external_id"
+              ? " — same requisition id"
+              : "";
+        this.setStatus("ok", `Already on your board (#${res.job!.id})${why}.`, link);
       } else {
         this.setStatus("ok", `Saved to ${payload.stage} (#${res.job!.id}).`, link);
       }

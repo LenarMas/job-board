@@ -207,7 +207,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!res.ok) {
           sendResponse({ ok: false, error: body?.error ?? `JobTrack responded with ${res.status}` });
         } else {
-          sendResponse({ ok: true, job: body.job, duplicate: body.duplicate, appUrl: APP_URL });
+          sendResponse({
+            ok: true,
+            job: body.job,
+            duplicate: body.duplicate,
+            matchedOn: body.matchedOn,
+            appUrl: APP_URL,
+          });
         }
       })
       .catch((err) =>
