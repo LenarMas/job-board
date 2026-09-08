@@ -143,11 +143,21 @@ export function createServices(db: Db) {
   function createJob(input: CreateJobInput) {
     const board = getOrCreateDefaultBoard();
     let stageId = input.stageId;
-    if (!stageId) {
+    let stageName: string | undefined;
+    if (stageId) {
+      stageName = db.select().from(stages).where(eq(stages.id, stageId)).get()?.name;
+    } else {
       const stage = getStageByName(board.id, input.stageName ?? "wishlist");
       if (!stage) throw new Error(`unknown stage: ${input.stageName}`);
       stageId = stage.id;
+      stageName = stage.name;
     }
+    // A job born in applied was applied to at creation — without this stamp
+    // it never counts in the applications-per-week metrics (moveJob only
+    // covers jobs that pass through applied later).
+    const appliedAt =
+      input.appliedAt ??
+      (stageName === "applied" ? input.createdAt ?? new Date() : undefined);
     const companyId = input.company
       ? findOrCreateCompany(input.company).id
       : undefined;
@@ -166,7 +176,7 @@ export function createServices(db: Db) {
         deadline: input.deadline,
         position: nextPositionInStage(stageId),
         ...(input.createdAt ? { createdAt: input.createdAt } : {}),
-        appliedAt: input.appliedAt,
+        appliedAt,
         rejectedAt: input.rejectedAt,
         sourceId: input.sourceId,
         extras: input.extras,

@@ -1,4 +1,4 @@
-import type { CapturedJob, FrameScrape } from "./types";
+import type { CapturedJob } from "./types";
 
 /**
  * The in-page capture panel. Unlike an action popup, it lives in the page
@@ -72,8 +72,8 @@ const HTML = `
       <label>Post URL<input name="url" /></label>
       <label>Stage
         <select name="stage">
-          <option value="wishlist" selected>Wishlist</option>
-          <option value="applied">Applied</option>
+          <option value="wishlist">Wishlist</option>
+          <option value="applied" selected>Applied</option>
           <option value="interview">Interview</option>
           <option value="offer">Offer</option>
           <option value="rejected">Rejected</option>
@@ -128,16 +128,6 @@ export class CapturePanel {
     this.q<HTMLButtonElement>("[data-autofill]").addEventListener("click", () => {
       void this.autofill();
     });
-    this.field("stage").addEventListener("change", () => {
-      this.stageTouched = true;
-    });
-  }
-
-  // Once the user picks a stage by hand, no automatic default may change it.
-  private stageTouched = false;
-
-  private defaultStage(name: string): void {
-    if (!this.stageTouched) this.field("stage").value = name;
   }
 
   private q<T extends Element>(sel: string): T {
@@ -174,10 +164,7 @@ export class CapturePanel {
   // parse; anything else is a user edit and is never overwritten.
   private lastAuto: Partial<Record<Field, string>> = {};
 
-  applyScrape(job: CapturedJob & Partial<Pick<FrameScrape, "applying">>): void {
-    // Capturing from a page with an application form means the user is
-    // applying right now — default the stage to match.
-    if (job.applying) this.defaultStage("applied");
+  applyScrape(job: CapturedJob): void {
     for (const name of FIELDS) {
       const input = this.field(name);
       const untouched =
@@ -239,9 +226,6 @@ export class CapturePanel {
   }
 
   private async autofill(): Promise<void> {
-    // Filling the application IS applying, even when form detection missed
-    // (e.g. the form lives in a tab the scraper never saw).
-    this.defaultStage("applied");
     const button = this.q<HTMLButtonElement>("[data-autofill]");
     button.disabled = true;
     this.setStatus("", "Filling application…");

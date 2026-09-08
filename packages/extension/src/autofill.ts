@@ -106,30 +106,6 @@ export function fillApplication(
   return { filled: keys.length, keys };
 }
 
-/**
- * Does this document look like a job application form? Requires either a
- * resume/file upload or two distinct recognized fields — a lone email box
- * (newsletter/cookie forms) must not count. Drives the panel's stage default:
- * capturing from an application page means the user is applying.
- */
-export function detectApplicationForm(doc: Document): boolean {
-  if (doc.querySelector('input[type="file"]')) return true;
-  const matched = new Set<Rule["key"]>();
-  const fields = [...doc.querySelectorAll<Fillable>("input, textarea")].filter(
-    (el) => !(el instanceof HTMLInputElement && SKIP_TYPES.has(el.type)),
-  );
-  for (const el of fields) {
-    const auto = el.getAttribute("autocomplete")?.toLowerCase();
-    const desc = descriptor(el);
-    const rule = FIELD_RULES.find(
-      (r) => (auto && r.autocomplete?.includes(auto)) || r.pattern.test(desc),
-    );
-    if (rule) matched.add(rule.key);
-    if (matched.size >= 2) return true;
-  }
-  return false;
-}
-
 /** Attach the saved resume to the page's resume/CV file input, if any. */
 export function attachResume(doc: Document, file: File): boolean {
   if (typeof DataTransfer === "undefined") return false;

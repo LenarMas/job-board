@@ -21,25 +21,18 @@ function stageSelect(panel: CapturePanel): HTMLSelectElement {
   return panel["q"]<HTMLSelectElement>('[name="stage"]');
 }
 
-describe("stage default while applying", () => {
-  it("defaults to applied when the page has an application form", () => {
+describe("stage default", () => {
+  it("defaults to applied — cards are captured at apply time", () => {
     const panel = new CapturePanel(callbacks);
-    panel.applyScrape({ ...JOB, applying: true });
     expect(stageSelect(panel).value).toBe("applied");
   });
 
-  it("stays on wishlist for a plain job view", () => {
-    const panel = new CapturePanel(callbacks);
-    panel.applyScrape({ ...JOB, applying: false });
-    expect(stageSelect(panel).value).toBe("wishlist");
-  });
-
-  it("never overrides a stage the user picked by hand", () => {
+  it("a stage the user picked survives later scrape updates", () => {
     const panel = new CapturePanel(callbacks);
     const select = stageSelect(panel);
     select.value = "interview";
     select.dispatchEvent(new Event("change"));
-    panel.applyScrape({ ...JOB, applying: true });
+    panel.applyScrape({ ...JOB });
     expect(select.value).toBe("interview");
   });
 });

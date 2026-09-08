@@ -1,12 +1,7 @@
-import {
-  attachResume,
-  detectApplicationForm,
-  fillApplication,
-  type AutofillProfile,
-} from "./autofill";
+import { attachResume, fillApplication, type AutofillProfile } from "./autofill";
 import { CapturePanel } from "./panel";
 import { parseJobPosting, scoreJob } from "./parse";
-import type { FrameScrape } from "./types";
+import type { CapturedJob } from "./types";
 
 /**
  * Injected into EVERY frame of the tab (Greenhouse and friends often live in
@@ -19,7 +14,7 @@ declare global {
   interface Window {
     __jobtrackContentLoaded?: boolean;
     __jobtrackPanel?: CapturePanel;
-    __jobtrackScrape?: () => FrameScrape;
+    __jobtrackScrape?: () => CapturedJob;
     __jobtrackAutofill?: (
       profile: AutofillProfile,
       resume: { name: string; mime: string; base64: string } | null,
@@ -33,19 +28,16 @@ declare global {
 const RETRY_INTERVAL_MS = 500;
 const RETRY_DEADLINE_MS = 6000;
 
-function bestOf(results: (FrameScrape | null)[]): FrameScrape | null {
-  let best: FrameScrape | null = null;
+function bestOf(results: (CapturedJob | null)[]): CapturedJob | null {
+  let best: CapturedJob | null = null;
   for (const job of results) {
     if (job && (!best || scoreJob(job) > scoreJob(best))) best = job;
   }
-  if (!best) return null;
-  // The application form often lives in a different frame than the best
-  // parse (ATS iframe vs. company page), so "applying" is any frame's.
-  return { ...best, applying: results.some((r) => r?.applying) };
+  return best;
 }
 
-async function scrapeAllFrames(): Promise<FrameScrape | null> {
-  const res: { ok: boolean; results?: (FrameScrape | null)[] } =
+async function scrapeAllFrames(): Promise<CapturedJob | null> {
+  const res: { ok: boolean; results?: (CapturedJob | null)[] } =
     await chrome.runtime.sendMessage({ type: "jobtrack-scrape-frames" });
   return res.ok ? bestOf(res.results ?? []) : null;
 }
@@ -85,10 +77,7 @@ if (!window.__jobtrackContentLoaded) {
   window.__jobtrackContentLoaded = true;
 
   // Every frame answers scrape/autofill invocations from the background.
-  window.__jobtrackScrape = () => ({
-    ...parseJobPosting(document, window.location.href),
-    applying: detectApplicationForm(document),
-  });
+  window.__jobtrackScrape = () => parseJobPosting(document, window.location.href);
   window.__jobtrackAutofill = (profile, resume) => {
     const { filled } = fillApplication(document, profile);
     let resumeAttached = false;

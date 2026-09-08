@@ -38,6 +38,26 @@ describe("jobs and companies", () => {
     expect(svc.listCompanies()).toHaveLength(1);
   });
 
+  it("stamps appliedAt when a job is created directly in applied", () => {
+    // Regression: only moveJob stamped appliedAt, so cards captured straight
+    // into applied never counted in the applications-per-week metrics.
+    const job = svc.createJob({ title: "SRE", company: "Acme", stageName: "applied" });
+    expect(job.appliedAt).not.toBeNull();
+
+    const appliedDate = daysAgo(8);
+    const backfilled = svc.createJob({
+      title: "DevOps",
+      company: "Acme",
+      stageName: "applied",
+      createdAt: daysAgo(9),
+      appliedAt: appliedDate,
+    });
+    expect(backfilled.appliedAt).toEqual(appliedDate); // explicit date wins
+
+    const wishlist = svc.createJob({ title: "Someday", stageName: "wishlist" });
+    expect(wishlist.appliedAt).toBeNull();
+  });
+
   it("filters listJobs by stage and query", () => {
     svc.createJob({ title: "SRE", company: "Acme", stageName: "applied" });
     svc.createJob({ title: "Platform Engineer", company: "Beta", stageName: "wishlist" });
