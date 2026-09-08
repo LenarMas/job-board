@@ -55,6 +55,8 @@ export async function POST(request: Request) {
     url,
     salary: body.salary || undefined,
     description: body.description || undefined,
+    // Saving straight into applied means the user applied themselves.
+    source: stage === "applied" ? "applied" : undefined,
   });
   return NextResponse.json({ job, duplicate: false }, { status: 201, headers });
 }

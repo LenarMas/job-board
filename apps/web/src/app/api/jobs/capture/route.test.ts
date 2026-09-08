@@ -64,6 +64,30 @@ describe("capture duplicate detection", () => {
     expect(svc.getJob(existing.id)?.stage?.name).toBe("applied");
   });
 
+  it("saves an applied capture with source applied-myself", async () => {
+    // Capturing at apply time IS applying myself; the Source field on the
+    // detail page must not come back empty.
+    const res = await capture({
+      title: "Cloud Engineer",
+      company: "Populous",
+      stage: "applied",
+      url: "https://www.linkedin.com/jobs/view/4409545477/",
+    });
+    const { job } = await res.json();
+    expect(svc.getJob(job.id)?.source).toBe("applied");
+  });
+
+  it("leaves source empty for a wishlist capture", async () => {
+    const res = await capture({
+      title: "Cloud Engineer",
+      company: "Populous",
+      stage: "wishlist",
+      url: "https://www.linkedin.com/jobs/view/4409545477/",
+    });
+    const { job } = await res.json();
+    expect(svc.getJob(job.id)?.source).toBeNull();
+  });
+
   it("still creates a genuinely new job", async () => {
     svc.createJob({
       title: "Cloud Engineer",

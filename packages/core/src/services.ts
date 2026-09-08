@@ -136,6 +136,7 @@ export function createServices(db: Db) {
     createdAt?: Date;
     appliedAt?: Date;
     rejectedAt?: Date;
+    source?: (typeof jobs.$inferInsert)["source"];
     sourceId?: string;
     extras?: unknown;
   };
@@ -178,6 +179,7 @@ export function createServices(db: Db) {
         ...(input.createdAt ? { createdAt: input.createdAt } : {}),
         appliedAt,
         rejectedAt: input.rejectedAt,
+        source: input.source,
         sourceId: input.sourceId,
         extras: input.extras,
       })
